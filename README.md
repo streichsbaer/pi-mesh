@@ -1,4 +1,11 @@
-# pi-mesh
+
+<h1 align="center">pi-mesh — local session mesh for Pi</h1>
+
+
+<p align="center">
+  <img src="assets/logo-512.png" alt="pi-mesh logo" width="240" />
+</p>
+
 
 `pi-mesh` is a local CLI and Agent Skill for coordinating multiple [Pi](https://github.com/earendil-works/pi) coding-agent sessions.
 
