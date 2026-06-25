@@ -37,6 +37,7 @@ npm run dev -- sessions list
 
 ```bash
 pi-mesh sessions list
+pi-mesh sessions list --include-pi  # include recent unmanaged Pi sessions
 pi-mesh sessions find auth
 pi-mesh transcript <session> --last 3
 pi-mesh state <session>
@@ -77,7 +78,7 @@ State is stored outside the repo:
 
 ## Existing Pi sessions
 
-Already-running normal Pi sessions can be discovered and read from their JSONL files. To message one, close the original process first and attach/resume it through `pi-mesh attach` so pi-mesh can own the live control socket.
+Already-running normal Pi sessions can be discovered and read from their JSONL files. `pi-mesh sessions list` shows managed sessions by default; pass `--include-pi` or `--all` to include recent unmanaged Pi sessions. To message one, close the original process first and attach/resume it through `pi-mesh attach` so pi-mesh can own the live control socket.
 
 ## License
 

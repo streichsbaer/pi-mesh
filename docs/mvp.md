@@ -8,6 +8,7 @@ The primary interface for agents is shell access:
 
 ```bash
 pi-mesh sessions list --json
+pi-mesh sessions list --include-pi --json
 pi-mesh transcript worker-api --last 2 --json
 pi-mesh send worker-api "Please review this patch" --delivery follow-up
 ```
@@ -101,6 +102,8 @@ Modes:
 For sleeping sessions, there is no active turn to steer, so delivery collapses to a normal prompt when waking.
 
 ## Existing session discovery
+
+`pi-mesh sessions list` shows managed sessions by default. Pass `--include-pi` or `--all` to include recent unmanaged Pi sessions.
 
 The parser reads normal Pi JSONL sessions from:
 

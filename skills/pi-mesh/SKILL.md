@@ -18,10 +18,11 @@ Use the `pi-mesh` CLI to discover, inspect, message, and spawn local Pi sessions
 
 ```bash
 pi-mesh sessions list --json
+pi-mesh sessions list --include-pi --json
 pi-mesh sessions find "auth" --json
 ```
 
-Use JSON output when another agent needs to consume the result.
+`list` shows managed sessions by default; add `--include-pi` or `--all` for recent unmanaged Pi sessions. Use JSON output when another agent needs to consume the result.
 
 ## Read state and transcript
 
@@ -82,7 +83,7 @@ The TUI is vanilla Pi. Do not ask for a custom persistent TUI wrapper; this proj
 
 For a coordinator session:
 
-1. List sessions: `pi-mesh sessions list --json`
+1. List managed sessions: `pi-mesh sessions list --json`
 2. Spawn workers for separate tasks.
 3. Send each worker a concrete prompt.
 4. Read worker transcripts or state.

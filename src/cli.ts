@@ -110,8 +110,8 @@ function printHelp(): void {
 	console.log(`pi-mesh
 
 Usage:
-  pi-mesh sessions list [--limit 25] [--json]
-  pi-mesh sessions find <query> [--limit 25] [--json]
+  pi-mesh sessions list [--limit 25] [--json] [--include-pi|--all]
+  pi-mesh sessions find <query> [--limit 25] [--json] [--include-pi|--all]
   pi-mesh transcript <session> [--last 3] [--json] [--show-tools]
   pi-mesh state <session> [--json]
 
@@ -123,6 +123,7 @@ Usage:
 Notes:
   - spawn defaults to sleeping/headless. Use --attach or pi-mesh run for vanilla Pi TUI.
   - send wakes sleeping managed sessions, or uses a live socket for pi-mesh run sessions.
+  - sessions list shows managed sessions by default; add --include-pi or --all for recent unmanaged Pi sessions.
   - unmanaged already-running Pi sessions are readable; close and attach them to make them managed.
 `);
 }
@@ -146,7 +147,8 @@ async function cmdSessions(parsed: ParsedArgs): Promise<void> {
 	const managed = await refreshStaleManagedSessions(workspace, await listManagedSessions(workspace));
 
 	if (sub === "list") {
-		const piSessions = await searchSessions({ limit });
+		const includePi = getBool(parsed, "include-pi") || getBool(parsed, "all");
+		const piSessions = includePi ? await searchSessions({ limit }) : [];
 		if (asJson) {
 			console.log(JSON.stringify({ ok: true, workspace, managed, piSessions }, null, 2));
 			return;
@@ -156,13 +158,19 @@ async function cmdSessions(parsed: ParsedArgs): Promise<void> {
 		console.log("## managed sessions");
 		if (managed.length) for (const record of managed) printManaged(record);
 		else console.log("[none]\n");
-		console.log("## recent Pi sessions");
-		for (const item of piSessions) {
-			console.log(`${item.rawSessionId} · ${item.sessionName || item.repoName}`);
-			console.log(`  updatedAt: ${formatTimestamp(item.updatedAt)}`);
-			console.log(`  path: ${item.path}`);
-			console.log(`  lastUser: ${truncate(compactWhitespace(item.lastUser || item.firstUser || ""), 160)}`);
-			console.log("");
+		if (includePi) {
+			console.log("## recent Pi sessions");
+			if (piSessions.length) {
+				for (const item of piSessions) {
+					console.log(`${item.rawSessionId} · ${item.sessionName || item.repoName}`);
+					console.log(`  updatedAt: ${formatTimestamp(item.updatedAt)}`);
+					console.log(`  path: ${item.path}`);
+					console.log(`  lastUser: ${truncate(compactWhitespace(item.lastUser || item.firstUser || ""), 160)}`);
+					console.log("");
+				}
+			} else {
+				console.log("[none]\n");
+			}
 		}
 		return;
 	}
