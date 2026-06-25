@@ -1,0 +1,52 @@
+{
+	"name": "pi-mesh",
+	"version": "0.1.0",
+	"description": "CLI and skill for coordinating Pi sessions through a local file/socket mesh",
+	"type": "module",
+	"bin": {
+		"pi-mesh": "dist/cli.js"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"docs",
+		"skills",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"dev": "tsx src/cli.ts",
+		"build": "tsc -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"check": "tsc -p tsconfig.json --noEmit",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "^0.80.2"
+	},
+	"devDependencies": {
+		"@types/node": "^24.12.4",
+		"shx": "^0.4.0",
+		"tsx": "^4.20.6",
+		"typescript": "^5.9.3"
+	},
+	"keywords": [
+		"pi",
+		"coding-agent",
+		"agents",
+		"cli",
+		"coordination"
+	],
+	"author": "",
+	"license": "MIT",
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
