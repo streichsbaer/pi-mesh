@@ -20,9 +20,10 @@ Use the `pi-mesh` CLI to discover, inspect, message, and spawn local Pi sessions
 pi-mesh sessions list --json
 pi-mesh sessions list --include-pi --json
 pi-mesh sessions find "auth" --json
+pi-mesh models list sonnet --cwd <session-cwd> --scoped --json
 ```
 
-`list` shows managed sessions by default; add `--include-pi` or `--all` for recent unmanaged Pi sessions. Use JSON output when another agent needs to consume the result.
+`list` shows managed sessions by default; add `--include-pi` or `--all` for recent unmanaged Pi sessions. `models list` shows Pi-configured models; pass `--cwd <session-cwd>` for the target session/settings scope, add `--scoped` for Pi `enabledModels`, and add `--all` for unauthenticated known models. Use JSON output when another agent needs to consume the result.
 
 ## Read state and transcript
 
@@ -40,6 +41,7 @@ pi-mesh transcript <session> --last 1 --show-tools
 pi-mesh send <session> "Please inspect the failing tests" --delivery auto
 pi-mesh send <session> "After you finish, summarize your changes" --delivery follow-up
 pi-mesh send <session> "Stop and check the logs first" --delivery steer
+pi-mesh send <session> "Use a cheaper model for this check" --model claude-haiku-4-5
 ```
 
 Delivery modes:
@@ -48,6 +50,8 @@ Delivery modes:
 - `prompt`: only for idle live sessions; starts a normal prompt
 - `steer`: steer active work when live; for sleeping sessions it behaves like a normal prompt
 - `follow-up`: queue after active work when live; for sleeping sessions it behaves like a normal prompt
+
+Use `--model <provider/model>`, `--provider <name> --model <id>`, or a unique model id to select a model for `spawn`, `run`, `attach`, or `send`. `--model model:thinking` and `--thinking off|minimal|low|medium|high|xhigh` are supported; explicit `--thinking` wins. Model choices are stored in the Pi session history.
 
 Use `--stream` if you want to display the headless turn output in the current terminal:
 
@@ -58,7 +62,7 @@ pi-mesh send worker-api "Fix the auth test" --stream
 ## Spawn workers
 
 ```bash
-pi-mesh spawn --name worker-api --cwd ./api --prompt "Investigate the auth test failure"
+pi-mesh spawn --name worker-api --cwd ./api --model anthropic/claude-sonnet-4-5 --prompt "Investigate the auth test failure"
 pi-mesh spawn --name worker-ui --cwd ./ui
 ```
 

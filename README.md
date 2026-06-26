@@ -39,14 +39,19 @@ npm run dev -- sessions list
 pi-mesh sessions list
 pi-mesh sessions list --include-pi  # include recent unmanaged Pi sessions
 pi-mesh sessions find auth
+pi-mesh models list sonnet --cwd ./api --scoped
 pi-mesh transcript <session> --last 3
 pi-mesh state <session>
 
 # Create a sleeping/headless managed worker. It exits when idle.
-pi-mesh spawn --name worker-api --cwd ./api --prompt "Inspect the auth tests"
+pi-mesh spawn --name worker-api --cwd ./api --model anthropic/claude-sonnet-4-5 --prompt "Inspect the auth tests"
 
 # Wake a sleeping session, run one turn, then shut down again.
 pi-mesh send worker-api "Fix the failing auth test" --stream
+
+# Override the model or thinking level for a managed session turn.
+pi-mesh send worker-api "Use a cheaper model for this check" --model claude-haiku-4-5
+pi-mesh send worker-api "Think deeply about this migration" --thinking high
 
 # Start or resume a vanilla Pi TUI with a live pi-mesh socket.
 pi-mesh run --name coordinator --cwd .
@@ -61,6 +66,8 @@ pi-mesh attach /path/to/session.jsonl --name old-session
 - `pi-mesh spawn` is sleeping/headless by default.
 - `pi-mesh spawn --attach` creates a session and immediately opens it in vanilla Pi TUI.
 - `pi-mesh send` uses a live socket when a managed TUI session is running; otherwise it wakes the sleeping session headlessly.
+- `--model <provider/model>`, optional `--provider <name>`, and `--thinking <level>` can be passed to `spawn`, `run`, `attach`, or `send`; model changes are stored in the Pi session history once a turn is materialized.
+- `pi-mesh models list [search] [--cwd <dir>]` lists Pi-configured models; use `--cwd <session cwd>` when inspecting models for a target session, add `--scoped` for Pi `enabledModels`, `--all` for unauthenticated known models, and `--json` for machine-readable output.
 
 ## Workspace storage
 

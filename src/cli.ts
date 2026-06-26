@@ -7,7 +7,7 @@ import { loadSessionData, loadSessionDataForSession, renderToolLine, resolveSess
 import { createMeshId, findManagedSession, listManagedSessions, lockPathFor, socketPathFor, upsertManagedSession } from "./registry.js";
 import { resolveWorkspace } from "./workspace.js";
 import { withDirectoryLock } from "./lock.js";
-import type { DeliveryMode, ManagedSessionRecord, SessionSummary, WorkspacePaths } from "./types.js";
+import { THINKING_LEVELS, type DeliveryMode, type ManagedSessionRecord, type ModelSelection, type SessionSummary, type ThinkingLevel, type WorkspacePaths } from "./types.js";
 
 interface ParsedArgs {
 	positionals: string[];
@@ -54,6 +54,13 @@ function getString(args: ParsedArgs, name: string, fallback?: string): string | 
 	return fallback;
 }
 
+function getRequiredString(args: ParsedArgs, name: string): string | undefined {
+	const value = args.options.get(name);
+	if (value === true) throw new Error(`--${name} requires a value.`);
+	if (typeof value === "string") return value;
+	return undefined;
+}
+
 function getBool(args: ParsedArgs, name: string): boolean {
 	return args.options.get(name) === true;
 }
@@ -67,6 +74,47 @@ function getDelivery(args: ParsedArgs): DeliveryMode {
 	const value = getString(args, "delivery", "auto") as DeliveryMode;
 	if (["auto", "prompt", "steer", "follow-up"].includes(value)) return value;
 	throw new Error(`Invalid --delivery ${JSON.stringify(value)}. Expected auto, prompt, steer, or follow-up.`);
+}
+
+function getThinkingLevel(args: ParsedArgs): ThinkingLevel | undefined {
+	const value = getRequiredString(args, "thinking");
+	if (value === undefined) return undefined;
+	if ((THINKING_LEVELS as readonly string[]).includes(value)) return value as ThinkingLevel;
+	throw new Error(`Invalid --thinking ${JSON.stringify(value)}. Expected: ${THINKING_LEVELS.join(", ")}.`);
+}
+
+function getModelSelection(args: ParsedArgs): ModelSelection | undefined {
+	const provider = getRequiredString(args, "provider")?.trim();
+	const model = getRequiredString(args, "model")?.trim();
+	const thinkingLevel = getThinkingLevel(args);
+	if (provider === "") throw new Error("--provider requires a non-empty value.");
+	if (model === "") throw new Error("--model requires a non-empty value.");
+	if (provider && !model) throw new Error("--provider requires --model.");
+	if (!provider && !model && !thinkingLevel) return undefined;
+	return { provider, model, thinkingLevel };
+}
+
+function modelRefHasThinkingSuffix(model: string | undefined): boolean {
+	if (!model) return false;
+	const colonIndex = model.lastIndexOf(":");
+	return colonIndex > 0 && (THINKING_LEVELS as readonly string[]).includes(model.slice(colonIndex + 1));
+}
+
+function mergeModelSelection(base: ModelSelection | undefined, override: ModelSelection | undefined): ModelSelection | undefined {
+	if (!base) return override;
+	if (!override) return base;
+	if (!override.model && !override.provider) return { ...base, thinkingLevel: override.thinkingLevel ?? base.thinkingLevel };
+	return {
+		provider: override.provider,
+		model: override.model,
+		thinkingLevel: override.thinkingLevel ?? (modelRefHasThinkingSuffix(override.model) ? undefined : base.thinkingLevel),
+	};
+}
+
+async function validateCliModelSelection(cwd: string, modelSelection: ModelSelection | undefined): Promise<ModelSelection | undefined> {
+	if (!modelSelection) return undefined;
+	const { validateModelSelection } = await import("./pi-runner.js");
+	return validateModelSelection({ cwd, modelSelection });
 }
 
 function isProcessAlive(pid: number | undefined): boolean {
@@ -114,16 +162,19 @@ Usage:
   pi-mesh sessions find <query> [--limit 25] [--json] [--include-pi|--all]
   pi-mesh transcript <session> [--last 3] [--json] [--show-tools]
   pi-mesh state <session> [--json]
+  pi-mesh models list [search] [--cwd <dir>] [--json] [--all] [--scoped]
 
-  pi-mesh spawn --name <name> [--cwd <dir>] [--prompt <text>] [--attach]
-  pi-mesh run --name <name> [--cwd <dir>] [--prompt <text>]
-  pi-mesh attach <session|session-file> [--name <name>]
-  pi-mesh send <session> <message> [--delivery auto|prompt|steer|follow-up] [--stream]
+  pi-mesh spawn --name <name> [--cwd <dir>] [--prompt <text>] [--attach] [--provider <name>] [--model <ref>] [--thinking <level>]
+  pi-mesh run --name <name> [--cwd <dir>] [--prompt <text>] [--provider <name>] [--model <ref>] [--thinking <level>]
+  pi-mesh attach <session|session-file> [--name <name>] [--provider <name>] [--model <ref>] [--thinking <level>]
+  pi-mesh send <session> <message> [--delivery auto|prompt|steer|follow-up] [--stream] [--provider <name>] [--model <ref>] [--thinking <level>]
 
 Notes:
   - spawn defaults to sleeping/headless. Use --attach or pi-mesh run for vanilla Pi TUI.
   - send wakes sleeping managed sessions, or uses a live socket for pi-mesh run sessions.
   - sessions list shows managed sessions by default; add --include-pi or --all for recent unmanaged Pi sessions.
+  - pass --model provider/model or --model model:thinking to choose a session model.
+  - use models list to inspect Pi-configured models; --cwd selects the target session/settings scope, --all includes unauthenticated models, and --scoped filters Pi enabledModels.
   - unmanaged already-running Pi sessions are readable; close and attach them to make them managed.
 `);
 }
@@ -134,6 +185,12 @@ function printManaged(record: ManagedSessionRecord): void {
 	console.log(`  cwd: ${record.cwd}`);
 	console.log(`  sessionFile: ${record.sessionFile}`);
 	if (record.socketPath) console.log(`  socket: ${record.socketPath}`);
+	if (record.pendingModelSelection) {
+		const model = record.pendingModelSelection.model
+			? `${record.pendingModelSelection.provider ? `${record.pendingModelSelection.provider}/` : ""}${record.pendingModelSelection.model}`
+			: undefined;
+		console.log(`  pendingModel: ${[model, record.pendingModelSelection.thinkingLevel && `thinking=${record.pendingModelSelection.thinkingLevel}`].filter(Boolean).join(" ")}`);
+	}
 	console.log(`  updatedAt: ${record.updatedAt}`);
 	if (record.lastError) console.log(`  error: ${record.lastError}`);
 	console.log("");
@@ -222,6 +279,22 @@ async function resolveSessionFile(
 	if (managed) return { sessionFile: managed.sessionFile, cwd: managed.cwd, managed };
 	const session = await resolveSessionSpec(spec);
 	return { sessionFile: session.path, cwd: session.cwd || process.cwd(), summary: session };
+}
+
+async function cmdModels(parsed: ParsedArgs): Promise<void> {
+	const sub = parsed.positionals[1] || "list";
+	if (sub !== "list") throw new Error(`Unknown models subcommand: ${sub}`);
+	const cwd = path.resolve(getString(parsed, "cwd", process.cwd()) || process.cwd());
+	const search = parsed.positionals.slice(2).join(" ").trim() || undefined;
+	const { listModels, printModelList } = await import("./model-list.js");
+	const result = await listModels({
+		cwd,
+		search,
+		includeAll: getBool(parsed, "all"),
+		scopedOnly: getBool(parsed, "scoped"),
+	});
+	if (getBool(parsed, "json")) console.log(JSON.stringify(result, null, 2));
+	else printModelList(result);
 }
 
 async function cmdTranscript(parsed: ParsedArgs): Promise<void> {
@@ -343,6 +416,7 @@ async function registerSession(
 		status: ManagedSessionRecord["status"];
 		socketPath?: string;
 		lastError?: string;
+		pendingModelSelection?: ModelSelection;
 	},
 ): Promise<ManagedSessionRecord> {
 	const now = new Date().toISOString();
@@ -360,7 +434,17 @@ async function registerSession(
 		createdAt: now,
 		updatedAt: now,
 		lastError: input.lastError,
+		pendingModelSelection: input.pendingModelSelection,
 	});
+}
+
+async function upsertManagedStatus(
+	workspace: WorkspacePaths,
+	record: ManagedSessionRecord,
+	patch: Partial<ManagedSessionRecord>,
+): Promise<ManagedSessionRecord> {
+	const pendingModelSelection = record.pendingModelSelection && (await exists(record.sessionFile)) ? undefined : record.pendingModelSelection;
+	return upsertManagedSession(workspace, { ...record, pendingModelSelection, ...patch });
 }
 
 async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
@@ -368,13 +452,14 @@ async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
 	const name = getString(parsed, "name");
 	const prompt = getString(parsed, "prompt") || parsed.positionals.slice(1).join(" ").trim();
 	const attach = getBool(parsed, "attach");
+	const modelSelection = await validateCliModelSelection(cwd, getModelSelection(parsed));
 	const workspace = await getWorkspace(parsed, cwd);
 	const meshId = createMeshId({ name, cwd });
 	const lockPath = lockPathFor(workspace, meshId);
 
 	await withDirectoryLock(lockPath, async () => {
 		const { createPersistentSession, runHeadlessTurn, runInteractive } = await import("./pi-runner.js");
-		const created = await createPersistentSession({ cwd, name });
+		const created = await createPersistentSession({ cwd, name, modelSelection });
 		if (!created.sessionFile) throw new Error("Pi did not create a persistent session file.");
 		let record = await registerSession(workspace, {
 			name,
@@ -383,6 +468,7 @@ async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
 			rawSessionId: created.rawSessionId,
 			kind: attach ? "interactive" : "sleeping",
 			status: attach ? "starting" : "offline",
+			pendingModelSelection: modelSelection && !(await exists(created.sessionFile)) ? modelSelection : undefined,
 		});
 
 		if (attach) {
@@ -394,12 +480,25 @@ async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
 				name,
 				initialMessage: prompt || undefined,
 				socketPath,
+				modelSelection,
 				onSessionFile: async (sessionFile, rawSessionId) => {
 					if (!sessionFile) return;
-					record = await upsertManagedSession(workspace, { ...record, sessionFile, rawSessionId, status: "running", pid: process.pid, socketPath });
+					record = await upsertManagedSession(workspace, {
+						...record,
+						sessionFile,
+						rawSessionId,
+						status: "running",
+						pid: process.pid,
+						socketPath,
+						pendingModelSelection: modelSelection && !(await exists(sessionFile)) ? modelSelection : undefined,
+					});
+				},
+				onMaterialized: async () => {
+					if (!record.pendingModelSelection) return;
+					record = await upsertManagedStatus(workspace, record, {});
 				},
 				onStatus: async (status, error) => {
-					record = await upsertManagedSession(workspace, { ...record, status, lastError: error, pid: process.pid, socketPath });
+					record = await upsertManagedStatus(workspace, record, { status, lastError: error, pid: process.pid, socketPath });
 				},
 			});
 			return;
@@ -407,12 +506,13 @@ async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
 
 		if (prompt) {
 			await upsertManagedSession(workspace, { ...record, status: "busy" });
-			const result = await runHeadlessTurn({ cwd, sessionFile: record.sessionFile, message: prompt, delivery: "prompt", stream: getBool(parsed, "stream") });
+			const result = await runHeadlessTurn({ cwd, sessionFile: record.sessionFile, message: prompt, delivery: "prompt", stream: getBool(parsed, "stream"), modelSelection });
 			record = await upsertManagedSession(workspace, {
 				...record,
 				sessionFile: result.sessionFile || record.sessionFile,
 				rawSessionId: result.rawSessionId,
 				status: "offline",
+				pendingModelSelection: undefined,
 			});
 		}
 
@@ -428,9 +528,13 @@ async function cmdRun(parsed: ParsedArgs): Promise<void> {
 	const cwd = path.resolve(getString(parsed, "cwd", process.cwd()) || process.cwd());
 	const name = getString(parsed, "name");
 	const prompt = getString(parsed, "prompt") || parsed.positionals.slice(1).join(" ").trim();
+	const rawModelSelection = getModelSelection(parsed);
 	const workspace = await getWorkspace(parsed, cwd);
 	const existing = name ? await findManagedSession(workspace, name) : undefined;
 	const sessionFile = existing?.sessionFile;
+	const pendingModelSelection = existing && !(await exists(existing.sessionFile)) ? existing.pendingModelSelection : undefined;
+	const seedModelSelection = mergeModelSelection(pendingModelSelection, rawModelSelection);
+	const modelSelection = await validateCliModelSelection(existing?.cwd || cwd, seedModelSelection);
 	const meshId = createMeshId({ name, cwd, sessionFile });
 	const socketPath = socketPathFor(workspace, existing?.meshId || meshId);
 	let record = existing;
@@ -442,6 +546,7 @@ async function cmdRun(parsed: ParsedArgs): Promise<void> {
 		name,
 		initialMessage: prompt || undefined,
 		socketPath,
+		modelSelection,
 		onSessionFile: async (newSessionFile, rawSessionId) => {
 			if (!newSessionFile) return;
 			record = await registerSession(workspace, {
@@ -452,11 +557,16 @@ async function cmdRun(parsed: ParsedArgs): Promise<void> {
 				kind: "interactive",
 				status: "running",
 				socketPath,
+				pendingModelSelection: modelSelection && !(await exists(newSessionFile)) ? modelSelection : undefined,
 			});
+		},
+		onMaterialized: async () => {
+			if (!record?.pendingModelSelection) return;
+			record = await upsertManagedStatus(workspace, record, {});
 		},
 		onStatus: async (status, error) => {
 			if (!record) return;
-			record = await upsertManagedSession(workspace, { ...record, status, lastError: error, pid: process.pid, socketPath });
+			record = await upsertManagedStatus(workspace, record, { status, lastError: error, pid: process.pid, socketPath });
 		},
 	});
 }
@@ -464,8 +574,12 @@ async function cmdRun(parsed: ParsedArgs): Promise<void> {
 async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 	const spec = parsed.positionals[1];
 	if (!spec) throw new Error("Usage: pi-mesh attach <session|session-file>");
+	const rawModelSelection = getModelSelection(parsed);
 	const workspace = await getWorkspace(parsed);
 	const resolved = await resolveSessionFile(workspace, spec);
+	const pendingModelSelection = resolved.managed && !(await exists(resolved.managed.sessionFile)) ? resolved.managed.pendingModelSelection : undefined;
+	const seedModelSelection = mergeModelSelection(pendingModelSelection, rawModelSelection);
+	const modelSelection = await validateCliModelSelection(resolved.cwd, seedModelSelection);
 	const name = getString(parsed, "name", resolved.managed?.name);
 	const meshId = createMeshId({ name, cwd: resolved.cwd, sessionFile: resolved.sessionFile });
 	const socketPath = socketPathFor(workspace, resolved.managed?.meshId || meshId);
@@ -481,6 +595,7 @@ async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 		sessionFile: resolved.sessionFile,
 		name,
 		socketPath,
+		modelSelection,
 		onSessionFile: async (sessionFile, rawSessionId) => {
 			if (!sessionFile) return;
 			record = await registerSession(workspace, {
@@ -491,11 +606,16 @@ async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 				kind: "attached",
 				status: "running",
 				socketPath,
+				pendingModelSelection: modelSelection && !(await exists(sessionFile)) ? modelSelection : undefined,
 			});
+		},
+		onMaterialized: async () => {
+			if (!record?.pendingModelSelection) return;
+			record = await upsertManagedStatus(workspace, record, {});
 		},
 		onStatus: async (status, error) => {
 			if (!record) return;
-			record = await upsertManagedSession(workspace, { ...record, status, lastError: error, pid: process.pid, socketPath });
+			record = await upsertManagedStatus(workspace, record, { status, lastError: error, pid: process.pid, socketPath });
 		},
 	});
 }
@@ -504,6 +624,7 @@ async function cmdSend(parsed: ParsedArgs): Promise<void> {
 	const spec = parsed.positionals[1];
 	const message = parsed.positionals.slice(2).join(" ").trim() || getString(parsed, "message", "");
 	if (!spec || !message) throw new Error("Usage: pi-mesh send <session> <message>");
+	const rawModelSelection = getModelSelection(parsed);
 	const workspace = await getWorkspace(parsed);
 	let managed = await findManagedSession(workspace, spec);
 	if (!managed) {
@@ -516,12 +637,17 @@ async function cmdSend(parsed: ParsedArgs): Promise<void> {
 		throw new Error(`No managed session found for ${JSON.stringify(spec)}`);
 	}
 
+	const sessionFileExists = await exists(managed.sessionFile);
+	const pendingModelSelection = !sessionFileExists ? managed.pendingModelSelection : undefined;
+	const usingPendingModelSelection = Boolean(pendingModelSelection);
+	const modelSelection = await validateCliModelSelection(managed.cwd, mergeModelSelection(pendingModelSelection, rawModelSelection));
 	const delivery = getDelivery(parsed);
 	const socket = managed.socketPath;
 	if (socket && (await exists(socket))) {
 		const { sendToLiveSocket } = await import("./pi-runner.js");
 		try {
-			await sendToLiveSocket(socket, message, delivery);
+			await sendToLiveSocket(socket, message, delivery, modelSelection);
+			if (usingPendingModelSelection) managed = await upsertManagedSession(workspace, { ...managed, pendingModelSelection: undefined });
 			if (!getBool(parsed, "json")) console.log(`Sent to live session ${managed.meshId}`);
 			else console.log(JSON.stringify({ ok: true, delivery: "live", session: managed }, null, 2));
 			return;
@@ -550,6 +676,7 @@ async function cmdSend(parsed: ParsedArgs): Promise<void> {
 				message,
 				delivery: "prompt",
 				stream: getBool(parsed, "stream"),
+				modelSelection,
 			});
 			const next = await upsertManagedSession(workspace, {
 				...managed,
@@ -557,6 +684,7 @@ async function cmdSend(parsed: ParsedArgs): Promise<void> {
 				rawSessionId: result.rawSessionId,
 				status: "offline",
 				lastError: undefined,
+				pendingModelSelection: undefined,
 			});
 			if (!getBool(parsed, "json")) console.log(`Woke session ${managed.meshId}, delivered message, and shut it down.`);
 			else console.log(JSON.stringify({ ok: true, delivery: "wake", session: next }, null, 2));
@@ -576,6 +704,7 @@ async function main(): Promise<void> {
 	}
 
 	if (command === "sessions") return cmdSessions(parsed);
+	if (command === "models") return cmdModels(parsed);
 	if (command === "transcript") return cmdTranscript(parsed);
 	if (command === "state") return cmdState(parsed);
 	if (command === "spawn") return cmdSpawn(parsed);

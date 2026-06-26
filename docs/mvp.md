@@ -9,8 +9,10 @@ The primary interface for agents is shell access:
 ```bash
 pi-mesh sessions list --json
 pi-mesh sessions list --include-pi --json
+pi-mesh models list sonnet --cwd ./api --scoped --json
 pi-mesh transcript worker-api --last 2 --json
 pi-mesh send worker-api "Please review this patch" --delivery follow-up
+pi-mesh send worker-api "Use a cheaper model for this check" --model claude-haiku-4-5
 ```
 
 An Agent Skill ships with the project so Pi, Claude Code, Codex, and other coding agents can learn the CLI on demand.
@@ -90,7 +92,7 @@ The registry is append-only JSONL so crashes do not corrupt the whole registry.
 
 ## Message delivery
 
-`pi-mesh send <session> <message> --delivery ...`
+`pi-mesh send <session> <message> --delivery ... [--model <ref>] [--thinking <level>]`
 
 Modes:
 
@@ -100,6 +102,12 @@ Modes:
 - `follow-up`: queue after active work; for sleeping/offline sessions it behaves like prompt
 
 For sleeping sessions, there is no active turn to steer, so delivery collapses to a normal prompt when waking.
+
+## Model selection
+
+`spawn`, `run`, `attach`, and `send` accept `--model <provider/model-or-id>`, optional `--provider <name>`, and `--thinking off|minimal|low|medium|high|xhigh`. `--model model:thinking` is also accepted. Model and thinking changes are recorded in the Pi session JSONL using Pi's normal session entries once a turn is materialized; until then, a pending model seed is kept in the managed-session registry. pi-mesh rejects unknown models, ambiguous model references, invalid thinking levels, and live busy model changes before delivering a message.
+
+`pi-mesh models list [search] [--cwd <dir>] [--json] [--all] [--scoped]` inspects Pi-configured models for a cwd. Use `--cwd <session cwd>` when checking the model/settings scope for a target session. By default it lists auth-configured available models. `--all` includes known models without auth, and `--scoped` filters to Pi `enabledModels` settings.
 
 ## Existing session discovery
 

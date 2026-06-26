@@ -1,5 +1,14 @@
 export type DeliveryMode = "auto" | "prompt" | "steer" | "follow-up";
 
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export interface ModelSelection {
+	provider?: string;
+	model?: string;
+	thinkingLevel?: ThinkingLevel;
+}
+
 export interface SessionSummary {
 	path: string;
 	rawSessionId: string;
@@ -123,6 +132,7 @@ export interface ManagedSessionRecord {
 	createdAt: string;
 	updatedAt: string;
 	lastError?: string;
+	pendingModelSelection?: ModelSelection;
 }
 
 export interface WorkspacePaths {
