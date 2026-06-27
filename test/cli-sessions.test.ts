@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { upsertManagedSession } from "../src/registry.js";
-import type { ManagedSessionRecord, WorkspacePaths } from "../src/types.js";
-import { stableId } from "../src/utils.js";
+import type { ManagedSessionRecord, MeshPaths } from "../src/types.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tsxCli = path.join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
@@ -19,16 +18,15 @@ async function makeTempDir(prefix: string): Promise<string> {
 	return dir;
 }
 
-function workspaceFor(home: string, root: string): WorkspacePaths {
-	const id = stableId(root);
-	const baseDir = path.join(home, ".pi", "agent", "pi-mesh", "workspaces", id);
+function meshFor(home: string): MeshPaths {
+	const baseDir = path.join(home, ".pi", "agent", "pi-mesh");
 	return {
-		id,
-		root,
+		id: "local",
 		baseDir,
 		registryFile: path.join(baseDir, "registry.jsonl"),
 		inboxDir: path.join(baseDir, "inbox"),
 		locksDir: path.join(baseDir, "locks"),
+		socketDirFile: path.join(baseDir, "socket-dir"),
 	};
 }
 
@@ -61,11 +59,12 @@ async function runCli(home: string, args: string[], options: { expectFailure?: b
 	return { stdout, stderr, exitCode };
 }
 
-function managedRecord(workspaceRoot: string, sessionFile: string): ManagedSessionRecord {
+function managedRecord(folder: string, sessionFile: string): ManagedSessionRecord {
 	return {
 		meshId: "managed-worker",
 		name: "managed-worker",
-		cwd: workspaceRoot,
+		labels: ["dev"],
+		folder,
 		sessionFile,
 		rawSessionId: "managed-raw-session",
 		kind: "sleeping",
@@ -75,13 +74,13 @@ function managedRecord(workspaceRoot: string, sessionFile: string): ManagedSessi
 	};
 }
 
-async function writePiSession(home: string, workspaceRoot: string): Promise<string> {
+async function writePiSession(home: string, folderRoot: string): Promise<string> {
 	const rawSessionId = "11111111-1111-4111-8111-111111111111";
 	const sessionDir = path.join(home, ".pi", "agent", "sessions", "--tmp-pi-mesh-test--");
 	await mkdir(sessionDir, { recursive: true });
 	const sessionFile = path.join(sessionDir, `2025-01-01T00-00-00-000Z_${rawSessionId}.jsonl`);
 	const entries = [
-		{ type: "session", id: rawSessionId, cwd: workspaceRoot, timestamp: "2025-01-01T00:00:00.000Z" },
+		{ type: "session", id: rawSessionId, cwd: folderRoot, timestamp: "2025-01-01T00:00:00.000Z" },
 		{ type: "message", id: "u1", parentId: null, timestamp: "2025-01-01T00:00:01.000Z", message: { role: "user", content: "unmanaged prompt", timestamp: 1 } },
 		{
 			type: "message",
@@ -118,25 +117,69 @@ afterEach(async () => {
 describe("sessions CLI", () => {
 	it("keeps unmanaged Pi sessions out of list output unless explicitly requested", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
-		const workspaceRoot = await makeTempDir("pi-mesh-cli-workspace-");
-		const unmanagedSessionFile = await writePiSession(home, workspaceRoot);
-		const workspace = workspaceFor(home, workspaceRoot);
-		await upsertManagedSession(workspace, managedRecord(workspaceRoot, path.join(workspaceRoot, "managed.jsonl")));
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const unmanagedSessionFile = await writePiSession(home, folderRoot);
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderRoot, path.join(folderRoot, "managed.jsonl")));
 
-		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--workspace", workspaceRoot, "--json"])).stdout);
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
 		expect(listed.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
 		expect(listed.piSessions).toEqual([]);
 
-		const listedWithPi = JSON.parse((await runCli(home, ["sessions", "list", "--workspace", workspaceRoot, "--include-pi", "--json"])).stdout);
+		const listedWithPi = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--include-pi", "--json"])).stdout);
 		expect(listedWithPi.piSessions.map((item: { path: string }) => item.path)).toContain(unmanagedSessionFile);
+	});
+
+	it("filters central sessions by folder, name, and label", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderA = await realpath(await makeTempDir("pi-mesh-cli-folder-a-"));
+		const folderB = await realpath(await makeTempDir("pi-mesh-cli-folder-b-"));
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderA, path.join(folderA, "one.jsonl")));
+		await upsertManagedSession(mesh, { ...managedRecord(folderB, path.join(folderB, "two.jsonl")), meshId: "other-worker", rawSessionId: "other-raw", labels: ["other"] });
+
+		const byFolder = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderA, "--json"])).stdout);
+		expect(byFolder.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
+
+		const byLabel = JSON.parse((await runCli(home, ["sessions", "list", "--label", "dev", "--json"])).stdout);
+		expect(byLabel.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
+	});
+
+	it("requires an explicit broadcast when a send selector matches multiple sessions", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderA = await realpath(await makeTempDir("pi-mesh-cli-folder-a-"));
+		const folderB = await realpath(await makeTempDir("pi-mesh-cli-folder-b-"));
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderA, path.join(folderA, "one.jsonl")));
+		await upsertManagedSession(mesh, { ...managedRecord(folderB, path.join(folderB, "two.jsonl")), meshId: "second-worker", rawSessionId: "second-raw" });
+
+		const result = await runCli(home, ["send", "managed-worker", "hello"], { expectFailure: true });
+
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain("Multiple managed sessions match");
+		expect(result.stderr).toContain("--all");
+	});
+
+	it("checks attach live-session ownership before applying replacement metadata", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const otherFolder = await realpath(await makeTempDir("pi-mesh-cli-other-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), status: "running", pid: process.pid });
+
+		const result = await runCli(home, ["attach", sessionFile, "--name", "renamed", "--folder", otherFolder, "--label", "new-label"], { expectFailure: true });
+
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain("already live");
 	});
 
 	it("gives attach guidance when sending to an unmanaged readable Pi session", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
-		const workspaceRoot = await makeTempDir("pi-mesh-cli-workspace-");
-		const unmanagedSessionFile = await writePiSession(home, workspaceRoot);
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const unmanagedSessionFile = await writePiSession(home, folderRoot);
 
-		const result = await runCli(home, ["send", unmanagedSessionFile, "hello", "--workspace", workspaceRoot], { expectFailure: true });
+		const result = await runCli(home, ["send", unmanagedSessionFile, "hello", "--folder", folderRoot], { expectFailure: true });
 
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stderr).toContain("Session is readable but not managed");

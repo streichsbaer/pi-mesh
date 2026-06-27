@@ -29,7 +29,7 @@ export interface ListedModel {
 
 export interface ModelListResult {
 	ok: true;
-	cwd: string;
+	folder: string;
 	search?: string;
 	includeAll: boolean;
 	scopedOnly: boolean;
@@ -182,12 +182,12 @@ export function listModelsFromServices(services: ModelListServices, options: Lis
 	const loadError = services.modelRegistry.getError();
 	if (loadError) diagnostics.push({ type: "warning", message: `errors loading models.json: ${loadError}` });
 	if (options.scopedOnly && enabledModelPatterns.length === 0) {
-		diagnostics.push({ type: "info", message: "No Pi enabledModels patterns are configured for this cwd." });
+		diagnostics.push({ type: "info", message: "No Pi enabledModels patterns are configured for this folder." });
 	}
 
 	return {
 		ok: true,
-		cwd: services.cwd,
+		folder: services.cwd,
 		search: options.search,
 		includeAll: Boolean(options.includeAll),
 		scopedOnly: Boolean(options.scopedOnly),

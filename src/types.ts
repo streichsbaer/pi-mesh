@@ -122,9 +122,10 @@ export type ManagedSessionStatus = "offline" | "starting" | "running" | "idle" |
 export interface ManagedSessionRecord {
 	meshId: string;
 	name?: string;
+	labels?: string[];
 	kind: ManagedSessionKind;
 	status: ManagedSessionStatus;
-	cwd: string;
+	folder: string;
 	sessionFile: string;
 	rawSessionId?: string;
 	pid?: number;
@@ -135,11 +136,11 @@ export interface ManagedSessionRecord {
 	pendingModelSelection?: ModelSelection;
 }
 
-export interface WorkspacePaths {
-	id: string;
-	root: string;
+export interface MeshPaths {
+	id: "local";
 	baseDir: string;
 	registryFile: string;
 	inboxDir: string;
 	locksDir: string;
+	socketDirFile: string;
 }

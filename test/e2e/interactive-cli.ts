@@ -89,10 +89,8 @@ try {
 		"run",
 		"--name",
 		"e2e-live",
-		"--cwd",
-		ctx.workspace,
-		"--workspace",
-		ctx.workspace,
+		"--folder",
+		ctx.folder,
 		"--model",
 		ctx.model,
 		"--thinking",
@@ -102,9 +100,9 @@ try {
 
 	await waitForLiveManagedSession(ctx, "e2e-live", 90_000);
 	const livePrompt = "Reply with one short sentence containing PI_MESH_E2E_LIVE_OK.";
-	const liveSend = parseJson(await runCli(ctx, ["send", "e2e-live", livePrompt, "--workspace", ctx.workspace, "--json"], { timeoutMs: 240_000 }));
+	const liveSend = parseJson(await runCli(ctx, ["send", "e2e-live", livePrompt, "--json"], { timeoutMs: 240_000 }));
 	assert(liveSend.ok === true, "live send did not report ok=true");
-	assert(liveSend.delivery === "live", `expected live delivery, got ${liveSend.delivery}\nPTY output:\n${live.output()}`);
+	assert(liveSend.results?.[0]?.delivery === "live", `expected live delivery, got ${liveSend.results?.[0]?.delivery}\nPTY output:\n${live.output()}`);
 	await waitForAssistantTurn(ctx, "e2e-live", "PI_MESH_E2E_LIVE_OK", "PI_MESH_E2E_LIVE_OK", 90_000);
 	await stopInteractive(live, "e2e-live run");
 	started.pop();
@@ -114,10 +112,8 @@ try {
 		"spawn",
 		"--name",
 		"e2e-src",
-		"--cwd",
-		ctx.workspace,
-		"--workspace",
-		ctx.workspace,
+		"--folder",
+		ctx.folder,
 		"--model",
 		ctx.model,
 		"--thinking",
@@ -134,16 +130,14 @@ try {
 		source.session.sessionFile,
 		"--name",
 		"e2e-att",
-		"--workspace",
-		ctx.workspace,
 	], "e2e-att attach");
 	started.push({ handle: attached, label: "e2e-att attach" });
 	await waitForLiveManagedSession(ctx, "e2e-att", 90_000);
 
 	const attachPrompt = "Reply with one short sentence containing PI_MESH_E2E_ATTACHED_OK.";
-	const attachSend = parseJson(await runCli(ctx, ["send", "e2e-att", attachPrompt, "--workspace", ctx.workspace, "--json"], { timeoutMs: 240_000 }));
+	const attachSend = parseJson(await runCli(ctx, ["send", "e2e-att", attachPrompt, "--json"], { timeoutMs: 240_000 }));
 	assert(attachSend.ok === true, "attached send did not report ok=true");
-	assert(attachSend.delivery === "live", `expected live delivery for attached session, got ${attachSend.delivery}\nPTY output:\n${attached.output()}`);
+	assert(attachSend.results?.[0]?.delivery === "live", `expected live delivery for attached session, got ${attachSend.results?.[0]?.delivery}\nPTY output:\n${attached.output()}`);
 	await waitForAssistantTurn(ctx, "e2e-att", "PI_MESH_E2E_ATTACHED_OK", "PI_MESH_E2E_ATTACHED_OK", 90_000);
 	await stopInteractive(attached, "e2e-att attach");
 	started.pop();

@@ -19,7 +19,7 @@ console.log(`Real CLI E2E temp root: ${ctx.root}`);
 console.log(`Model: ${ctx.model}`);
 
 try {
-	const models = parseJson(await runCli(ctx, ["models", "list", ctx.model.split("/").at(-1) ?? ctx.model, "--cwd", ctx.workspace, "--all", "--json"], { timeoutMs: 60_000 }));
+	const models = parseJson(await runCli(ctx, ["models", "list", ctx.model.split("/").at(-1) ?? ctx.model, "--folder", ctx.folder, "--all", "--json"], { timeoutMs: 60_000 }));
 	const selectedModel = models.models?.find((item: any) => item.ref === ctx.model);
 	assert(selectedModel, `Expected ${ctx.model} in models list`);
 	assert(selectedModel.available === true, `Expected ${ctx.model} to be auth-configured/available`);
@@ -29,10 +29,8 @@ try {
 		"spawn",
 		"--name",
 		"e2e-headless",
-		"--cwd",
-		ctx.workspace,
-		"--workspace",
-		ctx.workspace,
+		"--folder",
+		ctx.folder,
 		"--model",
 		ctx.model,
 		"--thinking",
@@ -51,15 +49,13 @@ try {
 		"send",
 		"e2e-headless",
 		sendPrompt,
-		"--workspace",
-		ctx.workspace,
 		"--json",
 	], { timeoutMs: 240_000 }));
 	assert(sent.ok === true, "send JSON did not report ok=true");
-	assert(sent.delivery === "wake", `expected wake delivery, got ${sent.delivery}`);
+	assert(sent.results?.[0]?.delivery === "wake", `expected wake delivery, got ${sent.results?.[0]?.delivery}`);
 	await waitForAssistantTurn(ctx, "e2e-headless", "PI_MESH_E2E_SEND_OK", "PI_MESH_E2E_SEND_OK", 90_000);
 
-	const state = parseJson(await runCli(ctx, ["state", "e2e-headless", "--workspace", ctx.workspace, "--json"], { timeoutMs: 30_000 }));
+	const state = parseJson(await runCli(ctx, ["state", "e2e-headless", "--json"], { timeoutMs: 30_000 }));
 	assert(state.ok === true, "state JSON did not report ok=true");
 	assert(state.counts?.turns >= 2, `expected at least two turns, got ${state.counts?.turns}`);
 

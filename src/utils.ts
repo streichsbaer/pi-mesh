@@ -117,16 +117,6 @@ export function stableId(value: string, length = 16): string {
 	return createHash("sha256").update(value).digest("hex").slice(0, length);
 }
 
-export async function findGitRoot(startCwd: string): Promise<string | null> {
-	let current = path.resolve(startCwd);
-	while (true) {
-		if (await exists(path.join(current, ".git"))) return current;
-		const parent = path.dirname(current);
-		if (parent === current) return null;
-		current = parent;
-	}
-}
-
 export function parseDuration(value: string): number | null {
 	const text = String(value || "").trim();
 	if (!text) return null;

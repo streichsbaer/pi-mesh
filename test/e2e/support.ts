@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,7 @@ export interface E2EContext {
 	root: string;
 	home: string;
 	agentDir: string;
-	workspace: string;
+	folder: string;
 	model: string;
 	env: NodeJS.ProcessEnv;
 }
@@ -61,9 +61,9 @@ export async function setupRealE2E(): Promise<E2EContext> {
 	const root = await mkdtemp(path.join(tempBase, "pi-mesh-real-e2e-"));
 	const home = path.join(root, "home");
 	const agentDir = path.join(home, ".pi", "agent");
-	const workspace = path.join(root, "workspace");
+	const folder = path.join(root, "folder");
 	await mkdir(agentDir, { recursive: true });
-	await mkdir(workspace, { recursive: true });
+	await mkdir(folder, { recursive: true });
 
 	const sourceAgentDir = process.env.PI_MESH_E2E_SOURCE_AGENT_DIR || process.env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
 	const copiedAuth = await copyIfExists(path.join(sourceAgentDir, "auth.json"), path.join(agentDir, "auth.json"));
@@ -84,21 +84,15 @@ export async function setupRealE2E(): Promise<E2EContext> {
 		root,
 		home,
 		agentDir,
-		workspace,
+		folder,
 		model: process.env.PI_MESH_E2E_MODEL || defaultE2EModel,
 		env,
 	};
 }
 
 async function cleanupRuntimeSocketDirs(ctx: E2EContext): Promise<void> {
-	const workspacesDir = path.join(ctx.agentDir, "pi-mesh", "workspaces");
-	const entries = await readdir(workspacesDir, { withFileTypes: true }).catch(() => []);
-	await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
-		const socketDir = (await readFile(path.join(workspacesDir, entry.name, "socket-dir"), "utf8").catch(() => "")).trim();
-		if (!socketDir) return;
-		const socketRoot = path.dirname(socketDir);
-		if (path.basename(socketRoot).startsWith("pi-mesh-")) await rm(socketRoot, { recursive: true, force: true });
-	}));
+	const socketDir = (await readFile(path.join(ctx.agentDir, "pi-mesh", "socket-dir"), "utf8").catch(() => "")).trim();
+	if (socketDir && path.basename(socketDir).startsWith("pi-mesh-")) await rm(socketDir, { recursive: true, force: true });
 }
 
 export async function cleanupRealE2E(ctx: E2EContext): Promise<void> {
@@ -179,7 +173,7 @@ export async function waitFor<T>(label: string, fn: () => Promise<T | undefined>
 }
 
 export async function getManagedSession(ctx: E2EContext, name: string): Promise<any | undefined> {
-	const payload = parseJson(await runCli(ctx, ["sessions", "list", "--workspace", ctx.workspace, "--json"], { timeoutMs: 30_000 }));
+	const payload = parseJson(await runCli(ctx, ["sessions", "list", "--folder", ctx.folder, "--json"], { timeoutMs: 30_000 }));
 	return payload.managed?.find((record: any) => record.meshId === name || record.name === name);
 }
 
@@ -210,7 +204,7 @@ export async function waitForLiveManagedSession(ctx: E2EContext, name: string, t
 }
 
 export async function getTranscript(ctx: E2EContext, name: string, last = 5): Promise<any> {
-	return parseJson(await runCli(ctx, ["transcript", name, "--workspace", ctx.workspace, "--last", String(last), "--json"], { timeoutMs: 30_000 }));
+	return parseJson(await runCli(ctx, ["transcript", name, "--folder", ctx.folder, "--last", String(last), "--json"], { timeoutMs: 30_000 }));
 }
 
 function assistantText(turn: any): string {

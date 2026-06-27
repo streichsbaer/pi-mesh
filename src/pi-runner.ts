@@ -235,7 +235,6 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
 		if (options.socketPath) {
 			await fs.rm(options.socketPath, { force: true }).catch(() => undefined);
 			await fs.rmdir(path.dirname(options.socketPath)).catch(() => undefined);
-			await fs.rmdir(path.dirname(path.dirname(options.socketPath))).catch(() => undefined);
 		}
 		await runtime.dispose();
 	}

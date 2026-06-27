@@ -9,7 +9,7 @@ The primary interface for agents is shell access:
 ```bash
 pi-mesh sessions list --json
 pi-mesh sessions list --include-pi --json
-pi-mesh models list sonnet --cwd ./api --scoped --json
+pi-mesh models list sonnet --folder ./api --scoped --json
 pi-mesh transcript worker-api --last 2 --json
 pi-mesh send worker-api "Please review this patch" --delivery follow-up
 pi-mesh send worker-api "Use a cheaper model for this check" --model claude-haiku-4-5
@@ -63,37 +63,35 @@ For unmanaged already-running Pi sessions, users should close the original Pi pr
 - Use `pi-mesh spawn --attach` when you want to create a new session and immediately drop into vanilla Pi TUI.
 - There is no ambiguous non-sleeping background spawn mode in MVP. A non-sleeping session is an interactive `run` session.
 
-## Workspace
+## Local registry, folders, names, and labels
 
-A workspace is the coordination scope for a group of sessions.
+A machine has one durable pi-mesh registry. The session folder is where Pi runs for that session; names and labels are non-unique metadata for filtering and grouping.
 
-Default resolution:
-
-1. current git root
-2. current directory
-
-Override with:
+Common filters:
 
 ```bash
-pi-mesh --workspace /path/to/workspace ...
+pi-mesh sessions list --folder ./api
+pi-mesh sessions list --name worker-api
+pi-mesh sessions list --label pi-mesh-development
 ```
 
 Storage:
 
 ```text
-~/.pi/agent/pi-mesh/workspaces/<hash>/
+~/.pi/agent/pi-mesh/
   registry.jsonl
   inbox/
   locks/
+  socket-dir
 ```
 
-Live control sockets use short hashed paths under a private randomized runtime directory such as `/tmp/pi-mesh-<uid>-<random>/<workspace-hash>/`.
+Live control sockets use short hashed paths under a private randomized runtime directory such as `/tmp/pi-mesh-<uid>-<random>/`.
 
-The registry is append-only JSONL so crashes do not corrupt the whole registry.
+The registry is append-only JSONL so crashes do not corrupt the whole registry. Each underlying Pi JSONL session can be managed only once in the local registry.
 
 ## Message delivery
 
-`pi-mesh send <session> <message> --delivery ... [--model <ref>] [--thinking <level>]`
+`pi-mesh send [<session>] <message> [--folder <dir>] [--name <name>] [--label <label>] [--all] --delivery ... [--model <ref>] [--thinking <level>]`
 
 Modes:
 
@@ -102,13 +100,13 @@ Modes:
 - `steer`: steer an active live session; for sleeping/offline sessions it behaves like prompt
 - `follow-up`: queue after active work; for sleeping/offline sessions it behaves like prompt
 
-For sleeping sessions, there is no active turn to steer, so delivery collapses to a normal prompt when waking.
+For sleeping sessions, there is no active turn to steer, so delivery collapses to a normal prompt when waking. If a selector matches multiple sessions, `send` fails unless `--all` is present.
 
 ## Model selection
 
 `spawn`, `run`, `attach`, and `send` accept `--model <provider/model-or-id>`, optional `--provider <name>`, and `--thinking off|minimal|low|medium|high|xhigh`. `--model model:thinking` is also accepted. Model and thinking changes are recorded in the Pi session JSONL using Pi's normal session entries once a turn is materialized; until then, a pending model seed is kept in the managed-session registry. pi-mesh rejects unknown models, ambiguous model references, invalid thinking levels, and live busy model changes before delivering a message.
 
-`pi-mesh models list [search] [--cwd <dir>] [--json] [--all] [--scoped]` inspects Pi-configured models for a cwd. Use `--cwd <session cwd>` when checking the model/settings scope for a target session. By default it lists auth-configured available models. `--all` includes known models without auth, and `--scoped` filters to Pi `enabledModels` settings.
+`pi-mesh models list [search] [--folder <dir>] [--json] [--all] [--scoped]` inspects Pi-configured models for a folder. Use `--folder <session-folder>` when checking the model/settings scope for a target session. By default it lists auth-configured available models. `--all` includes known models without auth, and `--scoped` filters to Pi `enabledModels` settings.
 
 ## Existing session discovery
 
