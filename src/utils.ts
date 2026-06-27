@@ -30,6 +30,33 @@ export async function ensureDir(dir: string): Promise<void> {
 	await fs.mkdir(dir, { recursive: true });
 }
 
+export async function ensurePrivateDir(dir: string): Promise<void> {
+	let stat: Awaited<ReturnType<typeof fs.lstat>>;
+	try {
+		stat = await fs.lstat(dir);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		await fs.mkdir(dir, { mode: 0o700 });
+		stat = await fs.lstat(dir);
+	}
+	if (stat.isSymbolicLink()) throw new Error(`${dir} must not be a symbolic link`);
+	if (!stat.isDirectory()) throw new Error(`${dir} is not a directory`);
+	if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+		throw new Error(`${dir} is not owned by the current user`);
+	}
+	if ((stat.mode & 0o077) !== 0) await fs.chmod(dir, 0o700);
+}
+
+export function userRuntimeId(): string {
+	if (typeof process.getuid === "function") return String(process.getuid());
+	return stableId(homeDir(), 8);
+}
+
+export function socketRuntimePrefix(): string {
+	const base = process.platform === "win32" ? os.tmpdir() : "/tmp";
+	return path.join(base, `pi-mesh-${userRuntimeId()}-`);
+}
+
 export async function readJson<T>(filePath: string, fallback: T): Promise<T> {
 	try {
 		return JSON.parse(await fs.readFile(filePath, "utf8")) as T;

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ManagedSessionRecord, WorkspacePaths } from "./types.js";
-import { compactWhitespace, safeJson, stableId } from "./utils.js";
+import { compactWhitespace, ensureDir, ensurePrivateDir, safeJson, socketRuntimePrefix, stableId } from "./utils.js";
 
 interface RegistryEvent {
 	type: "upsert" | "delete";
@@ -84,8 +84,42 @@ export async function markManagedSession(
 	return upsertManagedSession(workspace, { ...current, ...patch });
 }
 
-export function socketPathFor(workspace: WorkspacePaths, meshId: string): string {
-	return path.join(workspace.socketsDir, `${normalizeMeshId(meshId)}.sock`);
+const SOCKET_DIR_FILE = "socket-dir";
+
+async function createRuntimeSocketDir(workspace: WorkspacePaths): Promise<string> {
+	await ensureDir(workspace.baseDir);
+	const root = await fs.mkdtemp(socketRuntimePrefix());
+	await ensurePrivateDir(root);
+	const dir = path.join(root, workspace.id);
+	await ensurePrivateDir(dir);
+	await fs.writeFile(path.join(workspace.baseDir, SOCKET_DIR_FILE), `${dir}\n`, { mode: 0o600 });
+	return dir;
+}
+
+async function ensureStoredRuntimeSocketDir(dir: string): Promise<string | undefined> {
+	try {
+		await ensurePrivateDir(path.dirname(dir));
+		await ensurePrivateDir(dir);
+		return dir;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+async function runtimeSocketDirFor(workspace: WorkspacePaths): Promise<string> {
+	const socketDirFile = path.join(workspace.baseDir, SOCKET_DIR_FILE);
+	const stored = (await fs.readFile(socketDirFile, "utf8").catch(() => "")).trim();
+	if (stored) {
+		const dir = await ensureStoredRuntimeSocketDir(stored);
+		if (dir) return dir;
+	}
+	return createRuntimeSocketDir(workspace);
+}
+
+export async function socketPathFor(workspace: WorkspacePaths, meshId: string): Promise<string> {
+	const dir = await runtimeSocketDirFor(workspace);
+	return path.join(dir, `${stableId(`${workspace.id}:${normalizeMeshId(meshId)}`, 20)}.sock`);
 }
 
 export function lockPathFor(workspace: WorkspacePaths, meshId: string): string {

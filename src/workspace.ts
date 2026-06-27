@@ -13,7 +13,6 @@ export async function resolveWorkspace(cwd = process.cwd(), explicitRoot?: strin
 		registryFile: path.join(baseDir, "registry.jsonl"),
 		inboxDir: path.join(baseDir, "inbox"),
 		locksDir: path.join(baseDir, "locks"),
-		socketsDir: path.join(baseDir, "sockets"),
 	};
 	await ensureWorkspace(workspace);
 	return workspace;
@@ -24,6 +23,5 @@ export async function ensureWorkspace(workspace: WorkspacePaths): Promise<void> 
 		ensureDir(workspace.baseDir),
 		ensureDir(workspace.inboxDir),
 		ensureDir(workspace.locksDir),
-		ensureDir(workspace.socketsDir),
 	]);
 }

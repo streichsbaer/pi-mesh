@@ -142,5 +142,4 @@ export interface WorkspacePaths {
 	registryFile: string;
 	inboxDir: string;
 	locksDir: string;
-	socketsDir: string;
 }

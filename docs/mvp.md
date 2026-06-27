@@ -85,8 +85,9 @@ Storage:
   registry.jsonl
   inbox/
   locks/
-  sockets/
 ```
+
+Live control sockets use short hashed paths under a private randomized runtime directory such as `/tmp/pi-mesh-<uid>-<random>/<workspace-hash>/`.
 
 The registry is append-only JSONL so crashes do not corrupt the whole registry.
 

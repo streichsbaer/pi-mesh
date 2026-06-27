@@ -33,6 +33,21 @@ Or run directly:
 npm run dev -- sessions list
 ```
 
+## Testing
+
+```bash
+npm run ci
+```
+
+Real Pi CLI smoke tests are opt-in because they use live auth/subscription credentials. They copy `auth.json` into an isolated temp Pi agent dir and default to the cheapest configured model, `openai-codex/gpt-5.4-mini`:
+
+```bash
+PI_MESH_REAL_E2E=1 npm run test:e2e:real
+PI_MESH_REAL_E2E=1 npm run test:e2e:interactive
+```
+
+Set `PI_MESH_E2E_MODEL=<provider/model>` to override the model, `PI_MESH_E2E_SOURCE_AGENT_DIR=<dir>` to copy auth from a non-default Pi agent dir, and `PI_MESH_E2E_KEEP=1` to keep the temp workspace for debugging.
+
 ## Common commands
 
 ```bash
@@ -80,8 +95,9 @@ State is stored outside the repo:
   registry.jsonl
   inbox/
   locks/
-  sockets/
 ```
+
+Live control sockets use short hashed paths under a private randomized runtime directory such as `/tmp/pi-mesh-<uid>-<random>/<workspace-hash>/`.
 
 ## Existing Pi sessions
 

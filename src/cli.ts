@@ -7,6 +7,7 @@ import { loadSessionData, loadSessionDataForSession, renderToolLine, resolveSess
 import { createMeshId, findManagedSession, listManagedSessions, lockPathFor, socketPathFor, upsertManagedSession } from "./registry.js";
 import { resolveWorkspace } from "./workspace.js";
 import { withDirectoryLock } from "./lock.js";
+import { mergeModelSelection } from "./model-selection.js";
 import { THINKING_LEVELS, type DeliveryMode, type ManagedSessionRecord, type ModelSelection, type SessionSummary, type ThinkingLevel, type WorkspacePaths } from "./types.js";
 
 interface ParsedArgs {
@@ -92,23 +93,6 @@ function getModelSelection(args: ParsedArgs): ModelSelection | undefined {
 	if (provider && !model) throw new Error("--provider requires --model.");
 	if (!provider && !model && !thinkingLevel) return undefined;
 	return { provider, model, thinkingLevel };
-}
-
-function modelRefHasThinkingSuffix(model: string | undefined): boolean {
-	if (!model) return false;
-	const colonIndex = model.lastIndexOf(":");
-	return colonIndex > 0 && (THINKING_LEVELS as readonly string[]).includes(model.slice(colonIndex + 1));
-}
-
-function mergeModelSelection(base: ModelSelection | undefined, override: ModelSelection | undefined): ModelSelection | undefined {
-	if (!base) return override;
-	if (!override) return base;
-	if (!override.model && !override.provider) return { ...base, thinkingLevel: override.thinkingLevel ?? base.thinkingLevel };
-	return {
-		provider: override.provider,
-		model: override.model,
-		thinkingLevel: override.thinkingLevel ?? (modelRefHasThinkingSuffix(override.model) ? undefined : base.thinkingLevel),
-	};
 }
 
 async function validateCliModelSelection(cwd: string, modelSelection: ModelSelection | undefined): Promise<ModelSelection | undefined> {
@@ -472,7 +456,7 @@ async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
 		});
 
 		if (attach) {
-			const socketPath = socketPathFor(workspace, record.meshId);
+			const socketPath = await socketPathFor(workspace, record.meshId);
 			record = await upsertManagedSession(workspace, { ...record, socketPath, status: "starting", kind: "interactive" });
 			await runInteractive({
 				cwd,
@@ -536,7 +520,7 @@ async function cmdRun(parsed: ParsedArgs): Promise<void> {
 	const seedModelSelection = mergeModelSelection(pendingModelSelection, rawModelSelection);
 	const modelSelection = await validateCliModelSelection(existing?.cwd || cwd, seedModelSelection);
 	const meshId = createMeshId({ name, cwd, sessionFile });
-	const socketPath = socketPathFor(workspace, existing?.meshId || meshId);
+	const socketPath = await socketPathFor(workspace, existing?.meshId || meshId);
 	let record = existing;
 
 	const { runInteractive } = await import("./pi-runner.js");
@@ -582,7 +566,7 @@ async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 	const modelSelection = await validateCliModelSelection(resolved.cwd, seedModelSelection);
 	const name = getString(parsed, "name", resolved.managed?.name);
 	const meshId = createMeshId({ name, cwd: resolved.cwd, sessionFile: resolved.sessionFile });
-	const socketPath = socketPathFor(workspace, resolved.managed?.meshId || meshId);
+	const socketPath = await socketPathFor(workspace, resolved.managed?.meshId || meshId);
 	let record = resolved.managed;
 
 	if (!resolved.managed) {

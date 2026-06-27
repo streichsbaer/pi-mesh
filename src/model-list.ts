@@ -3,6 +3,8 @@ import { THINKING_LEVELS, type ThinkingLevel } from "./types.js";
 
 type PiModel = ReturnType<AgentSessionServices["modelRegistry"]["getAll"]>[number];
 
+export type ModelListServices = Pick<AgentSessionServices, "cwd" | "diagnostics" | "modelRegistry" | "settingsManager">;
+
 export interface ListModelsOptions {
 	cwd: string;
 	search?: string;
@@ -135,8 +137,7 @@ function matchesSearch(model: ListedModel, search: string | undefined): boolean 
 		.some((value) => String(value).toLowerCase().includes(lower));
 }
 
-export async function listModels(options: ListModelsOptions): Promise<ModelListResult> {
-	const services = await createAgentSessionServices({ cwd: options.cwd });
+export function listModelsFromServices(services: ModelListServices, options: ListModelsOptions): ModelListResult {
 	const allModels = services.modelRegistry.getAll();
 	const availableModels = services.modelRegistry.getAvailable();
 	const availableKeys = new Set(availableModels.map((model) => modelKey({ provider: model.provider, model: model.id })));
@@ -201,6 +202,10 @@ export async function listModels(options: ListModelsOptions): Promise<ModelListR
 		diagnostics,
 		models: rows,
 	};
+}
+
+export async function listModels(options: ListModelsOptions): Promise<ModelListResult> {
+	return listModelsFromServices(await createAgentSessionServices({ cwd: options.cwd }), options);
 }
 
 function formatTokenCount(count: number): string {
