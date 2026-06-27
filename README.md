@@ -9,6 +9,14 @@
 
 `pi-mesh` is a local CLI and Agent Skill for coordinating multiple [Pi](https://github.com/earendil-works/pi) coding-agent sessions.
 
+## Installation
+
+```bash
+npm install -g @streichsbaer/pi-mesh
+```
+
+The package installs the `pi-mesh` binary.
+
 ## Goals
 
 - Keep vanilla Pi TUI for interactive use.
