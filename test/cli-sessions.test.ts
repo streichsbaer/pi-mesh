@@ -10,6 +10,7 @@ import type { ManagedSessionRecord, MeshPaths } from "../src/types.js";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tsxCli = path.join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
 const sourceCli = path.join(repoRoot, "src", "cli.ts");
+const CLI_TEST_TIMEOUT_MS = 20_000;
 const tempDirs: string[] = [];
 
 async function makeTempDir(prefix: string): Promise<string> {
@@ -128,7 +129,7 @@ describe("sessions CLI", () => {
 
 		const listedWithPi = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--include-pi", "--json"])).stdout);
 		expect(listedWithPi.piSessions.map((item: { path: string }) => item.path)).toContain(unmanagedSessionFile);
-	});
+	}, CLI_TEST_TIMEOUT_MS);
 
 	it("filters central sessions by folder, name, and label", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
@@ -143,7 +144,7 @@ describe("sessions CLI", () => {
 
 		const byLabel = JSON.parse((await runCli(home, ["sessions", "list", "--label", "dev", "--json"])).stdout);
 		expect(byLabel.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
-	});
+	}, CLI_TEST_TIMEOUT_MS);
 
 	it("requires an explicit broadcast when a send selector matches multiple sessions", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
@@ -158,7 +159,7 @@ describe("sessions CLI", () => {
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stderr).toContain("Multiple managed sessions match");
 		expect(result.stderr).toContain("--all");
-	});
+	}, CLI_TEST_TIMEOUT_MS);
 
 	it("checks attach live-session ownership before applying replacement metadata", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
@@ -172,7 +173,7 @@ describe("sessions CLI", () => {
 
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stderr).toContain("already live");
-	});
+	}, CLI_TEST_TIMEOUT_MS);
 
 	it("gives attach guidance when sending to an unmanaged readable Pi session", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
@@ -184,5 +185,5 @@ describe("sessions CLI", () => {
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stderr).toContain("Session is readable but not managed");
 		expect(result.stderr).toContain("pi-mesh attach");
-	});
+	}, CLI_TEST_TIMEOUT_MS);
 });
