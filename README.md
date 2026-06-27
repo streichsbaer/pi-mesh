@@ -9,8 +9,6 @@
 
 `pi-mesh` is a local CLI and Agent Skill for coordinating multiple [Pi](https://github.com/earendil-works/pi) coding-agent sessions.
 
-The CLI binary is `pi-mesh`.
-
 ## Goals
 
 - Keep vanilla Pi TUI for interactive use.
@@ -18,35 +16,6 @@ The CLI binary is `pi-mesh`.
 - Support sleeping managed sessions: session state persists, but the Pi process exits when idle.
 - Wake sleeping sessions on demand, resume the JSONL session, run a turn, and shut down again.
 - Avoid MCP and heavyweight daemons for the MVP.
-
-## Install for development
-
-```bash
-npm install
-npm run build
-npm link
-```
-
-Or run directly:
-
-```bash
-npm run dev -- sessions list
-```
-
-## Testing
-
-```bash
-npm run ci
-```
-
-Real Pi CLI smoke tests are opt-in because they use live auth/subscription credentials. They copy `auth.json` into an isolated temp Pi agent dir and default to the cheapest configured model, `openai-codex/gpt-5.4-mini`:
-
-```bash
-PI_MESH_REAL_E2E=1 npm run test:e2e:real
-PI_MESH_REAL_E2E=1 npm run test:e2e:interactive
-```
-
-Set `PI_MESH_E2E_MODEL=<provider/model>` to override the model, `PI_MESH_E2E_SOURCE_AGENT_DIR=<dir>` to copy auth from a non-default Pi agent dir, and `PI_MESH_E2E_KEEP=1` to keep the temp folder for debugging.
 
 ## Common commands
 
@@ -109,6 +78,35 @@ Live control sockets use short hashed paths under a private randomized runtime d
 ## Existing Pi sessions
 
 Already-running normal Pi sessions can be discovered and read from their JSONL files. `pi-mesh sessions list` shows managed sessions by default; pass `--include-pi` or `--all` to include recent unmanaged Pi sessions. To message one, close the original process first and attach/resume it through `pi-mesh attach` so pi-mesh can own the live control socket.
+
+## Install for development
+
+```bash
+npm install
+npm run build
+npm link
+```
+
+Or run directly:
+
+```bash
+npm run dev -- sessions list
+```
+
+## Testing
+
+```bash
+npm run ci
+```
+
+Real Pi CLI smoke tests are opt-in because they use live auth/subscription credentials. They copy `auth.json` into an isolated temp Pi agent dir and default to the cheapest configured model, `openai-codex/gpt-5.4-mini`:
+
+```bash
+PI_MESH_REAL_E2E=1 npm run test:e2e:real
+PI_MESH_REAL_E2E=1 npm run test:e2e:interactive
+```
+
+Set `PI_MESH_E2E_MODEL=<provider/model>` to override the model, `PI_MESH_E2E_SOURCE_AGENT_DIR=<dir>` to copy auth from a non-default Pi agent dir, and `PI_MESH_E2E_KEEP=1` to keep the temp folder for debugging.
 
 ## License
 

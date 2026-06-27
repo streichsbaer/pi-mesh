@@ -1,8 +1,9 @@
 {
-	"name": "pi-mesh",
+	"name": "@streichsbaer/pi-mesh",
 	"version": "0.1.0",
 	"description": "CLI and skill for coordinating Pi sessions through a local file/socket mesh",
 	"type": "module",
+	"packageManager": "npm@11.17.0",
 	"bin": {
 		"pi-mesh": "dist/cli.js"
 	},
@@ -15,16 +16,12 @@
 		}
 	},
 	"files": [
-		"dist",
-		"docs",
-		"skills",
-		"README.md",
-		"LICENSE"
+		"dist"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"dev": "tsx src/cli.ts",
-		"build": "tsc -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"build": "npm run clean && tsc -p tsconfig.build.json && shx chmod +x dist/cli.js",
 		"check": "tsc -p tsconfig.json --noEmit",
 		"check:test": "tsc -p tsconfig.test.json --noEmit",
 		"test": "vitest --run",
@@ -52,9 +49,24 @@
 		"cli",
 		"coordination"
 	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/streichsbaer/pi-mesh.git"
+	},
+	"bugs": {
+		"url": "https://github.com/streichsbaer/pi-mesh/issues"
+	},
+	"homepage": "https://github.com/streichsbaer/pi-mesh#readme",
 	"author": "",
 	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
 	"engines": {
 		"node": ">=24.18.0"
+	},
+	"volta": {
+		"node": "24.18.0",
+		"npm": "11.17.0"
 	}
 }
