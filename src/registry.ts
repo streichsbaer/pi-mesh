@@ -95,6 +95,10 @@ export async function findManagedSessions(mesh: MeshPaths, selector: SessionSele
 	return filterManagedSessions(await listManagedSessions(mesh), selector);
 }
 
+export async function findManagedSessionById(mesh: MeshPaths, meshId: string): Promise<ManagedSessionRecord | undefined> {
+	return (await listManagedSessions(mesh)).find((record) => record.meshId === meshId);
+}
+
 export async function findManagedSession(mesh: MeshPaths, spec: string): Promise<ManagedSessionRecord | undefined> {
 	return (await findManagedSessions(mesh, { spec }))[0];
 }
@@ -121,6 +125,10 @@ export async function upsertManagedSession(
 	};
 	await appendRegistryEvent(mesh, { type: "upsert", record: next, timestamp: now });
 	return next;
+}
+
+export async function deleteManagedSession(mesh: MeshPaths, meshId: string): Promise<void> {
+	await appendRegistryEvent(mesh, { type: "delete", meshId, timestamp: new Date().toISOString() });
 }
 
 export async function markManagedSession(

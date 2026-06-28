@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { exists } from "./utils.js";
 import { formatTimestamp, truncate, compactWhitespace } from "./utils.js";
 import { loadSessionData, loadSessionDataForSession, renderToolLine, resolveSessionSpec, searchSessions, tail } from "./pi-session-parser.js";
-import { createMeshId, filterManagedSessions, findManagedSessions, listManagedSessions, lockPathFor, normalizeLabels, socketPathFor, upsertManagedSession, type SessionSelector } from "./registry.js";
+import { createMeshId, deleteManagedSession, filterManagedSessions, findManagedSessionById, findManagedSessions, listManagedSessions, lockPathFor, normalizeLabels, socketPathFor, upsertManagedSession, type SessionSelector } from "./registry.js";
 import { resolveMesh } from "./mesh.js";
 import { withDirectoryLock } from "./lock.js";
 import { mergeModelSelection } from "./model-selection.js";
@@ -145,6 +146,13 @@ function isLiveStatus(status: ManagedSessionRecord["status"]): boolean {
 	return status === "running" || status === "idle" || status === "busy" || status === "starting";
 }
 
+async function activeSessionReason(record: ManagedSessionRecord): Promise<string | undefined> {
+	if (isLiveStatus(record.status)) return `status=${record.status}`;
+	if (record.socketPath && await exists(record.socketPath)) return `socket=${record.socketPath}`;
+	if (record.status === "error" && isProcessAlive(record.pid)) return `pid=${record.pid}`;
+	return undefined;
+}
+
 function formatMatches(records: ManagedSessionRecord[]): string {
 	return records.map((record) => `- ${record.meshId}${record.name ? ` name=${JSON.stringify(record.name)}` : ""} folder=${record.folder} status=${record.status}`).join("\n");
 }
@@ -154,14 +162,41 @@ function isProcessAlive(pid: number | undefined): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
 	}
 }
 
 function isStaleSocketError(error: unknown): boolean {
 	const code = (error as NodeJS.ErrnoException | undefined)?.code;
 	return code === "ECONNREFUSED" || code === "ENOENT" || code === "EPIPE" || code === "ECONNRESET";
+}
+
+async function confirmDeleteSessionFile(sessionFile: string): Promise<boolean> {
+	if (!process.stdin.isTTY || !process.stderr.isTTY) {
+		throw new Error("--delete-file requires an interactive terminal. Pass --force to delete the session file without confirmation.");
+	}
+	const rl = createInterface({ input: process.stdin, output: process.stderr });
+	try {
+		for (;;) {
+			const answer = (await rl.question(`Delete session file ${sessionFile}? [Y/n] `)).trim().toLowerCase();
+			if (answer === "" || answer === "y" || answer === "yes") return true;
+			if (answer === "n" || answer === "no") return false;
+			console.error("Please answer y or n.");
+		}
+	} finally {
+		rl.close();
+	}
+}
+
+async function removeExistingFile(filePath: string): Promise<boolean> {
+	try {
+		await fs.rm(filePath);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+		throw error;
+	}
 }
 
 async function refreshStaleManagedSessions(
@@ -191,6 +226,7 @@ function printHelp(): void {
 Usage:
   pi-mesh sessions list [--folder <dir>] [--name <name>] [--label <label>] [--limit 25] [--json] [--include-pi|--all]
   pi-mesh sessions find <query> [--folder <dir>] [--name <name>] [--label <label>] [--limit 25] [--json] [--include-pi|--all]
+  pi-mesh sessions delete <session> [--folder <dir>] [--name <name>] [--label <label>] [--delete-file] [--force] [--json]
   pi-mesh transcript <session> [--folder <dir>] [--name <name>] [--label <label>] [--last 3] [--json] [--show-tools]
   pi-mesh state <session> [--folder <dir>] [--name <name>] [--label <label>] [--json]
   pi-mesh models list [search] [--folder <dir>] [--json] [--all] [--scoped]
@@ -263,6 +299,44 @@ async function cmdSessions(parsed: ParsedArgs): Promise<void> {
 				console.log("[none]\n");
 			}
 		}
+		return;
+	}
+
+	if (sub === "delete" || sub === "remove" || sub === "forget") {
+		const spec = parsed.positionals[2];
+		if (!spec) throw new Error("Usage: pi-mesh sessions delete <session>");
+		const selector = await getSessionSelector(parsed, spec);
+		const matches = await findManagedSessions(mesh, selector);
+		if (matches.length === 0) throw new Error(`No managed session matches ${JSON.stringify(spec)}.`);
+		if (matches.length > 1) throw new Error(`Multiple managed sessions match ${JSON.stringify(spec)}; refine with --folder, --name, or --label:\n${formatMatches(matches)}`);
+		const deleteFileRequested = getBool(parsed, "delete-file");
+		const force = getBool(parsed, "force");
+		const confirmedSessionFile = matches[0].sessionFile;
+		await assertNotAlreadyActive(matches[0], "deleting it");
+		const deleteFileApproved = deleteFileRequested && (force || await confirmDeleteSessionFile(confirmedSessionFile));
+		const result = await withDirectoryLock(lockPathFor(mesh, matches[0].meshId), async () => {
+			const record = await findManagedSessionById(mesh, matches[0].meshId);
+			if (!record) throw new Error(`Session ${matches[0].meshId} was deleted concurrently.`);
+			await assertNotAlreadyActive(record, "deleting it");
+			let deletedFile = false;
+			if (deleteFileApproved) {
+				if (!force && record.sessionFile !== confirmedSessionFile) {
+					throw new Error(`Session file changed from ${confirmedSessionFile} to ${record.sessionFile}; rerun delete to confirm the new file.`);
+				}
+				deletedFile = await removeExistingFile(record.sessionFile);
+			}
+			if (record.socketPath) await fs.rm(record.socketPath, { force: true }).catch(() => undefined);
+			await deleteManagedSession(mesh, record.meshId);
+			return { record, deletedFile };
+		});
+		if (asJson) {
+			console.log(JSON.stringify({ ok: true, deleted: result.record, deletedFile: result.deletedFile }, null, 2));
+			return;
+		}
+		console.log(`Deleted managed session ${result.record.meshId} from the pi-mesh registry.`);
+		if (result.deletedFile) console.log(`Deleted session file ${result.record.sessionFile}.`);
+		else if (deleteFileRequested) console.log(`Kept session file ${result.record.sessionFile}.`);
+		else console.log(`Kept session file ${result.record.sessionFile}. Pass --delete-file to remove it too.`);
 		return;
 	}
 
@@ -468,8 +542,8 @@ async function registerSession(
 		folder: input.folder,
 		sessionFile: input.sessionFile,
 		rawSessionId: input.rawSessionId,
-		pid: process.pid,
-		socketPath: input.socketPath,
+		pid: input.status === "offline" ? undefined : process.pid,
+		socketPath: input.status === "offline" ? undefined : input.socketPath,
 		createdAt: now,
 		updatedAt: now,
 		lastError: input.lastError,
@@ -483,12 +557,33 @@ async function upsertManagedStatus(
 	patch: Partial<ManagedSessionRecord>,
 ): Promise<ManagedSessionRecord> {
 	const pendingModelSelection = record.pendingModelSelection && (await exists(record.sessionFile)) ? undefined : record.pendingModelSelection;
-	return upsertManagedSession(mesh, { ...record, pendingModelSelection, ...patch });
+	const next = { ...record, pendingModelSelection, ...patch };
+	if (next.status === "offline") {
+		next.pid = undefined;
+		next.socketPath = undefined;
+	}
+	return upsertManagedSession(mesh, next);
 }
 
-function assertNotAlreadyLive(record: ManagedSessionRecord | undefined, action: string): void {
-	if (!record || !isLiveStatus(record.status) || !isProcessAlive(record.pid)) return;
-	throw new Error(`Session ${record.meshId} is already live (${record.status}); use pi-mesh send or stop that TUI before ${action}.`);
+async function assertNotAlreadyActive(record: ManagedSessionRecord | undefined, action: string): Promise<void> {
+	if (!record) return;
+	const activeReason = await activeSessionReason(record);
+	if (!activeReason) return;
+	throw new Error(`Session ${record.meshId} is already active (${activeReason}); use pi-mesh send or stop that TUI before ${action}.`);
+}
+
+async function claimManagedSessionForActivation(
+	mesh: MeshPaths,
+	record: ManagedSessionRecord,
+	patch: Partial<ManagedSessionRecord>,
+	action: string,
+): Promise<ManagedSessionRecord> {
+	return withDirectoryLock(lockPathFor(mesh, record.meshId), async () => {
+		const latest = await findManagedSessionById(mesh, record.meshId);
+		if (!latest) throw new Error(`Session ${record.meshId} was deleted concurrently.`);
+		await assertNotAlreadyActive(latest, action);
+		return upsertManagedSession(mesh, { ...latest, ...patch });
+	});
 }
 
 async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
@@ -554,6 +649,8 @@ async function cmdSpawn(parsed: ParsedArgs): Promise<void> {
 			sessionFile: result.sessionFile || record.sessionFile,
 			rawSessionId: result.rawSessionId,
 			status: "offline",
+			pid: undefined,
+			socketPath: undefined,
 			pendingModelSelection: undefined,
 		});
 	}
@@ -580,16 +677,27 @@ async function cmdRun(parsed: ParsedArgs): Promise<void> {
 		if (matches.length > 1) throw new Error(`Multiple sessions named ${JSON.stringify(name)} match this folder/label selection; use a session id or --new:\n${formatMatches(matches)}`);
 		existing = matches[0];
 	}
-	assertNotAlreadyLive(existing, "opening another live TUI");
+	await assertNotAlreadyActive(existing, "opening another live TUI");
 
-	const sessionFile = existing?.sessionFile;
 	const pendingModelSelection = existing && !(await exists(existing.sessionFile)) ? existing.pendingModelSelection : undefined;
 	const seedModelSelection = mergeModelSelection(pendingModelSelection, rawModelSelection);
 	const runFolder = existing?.folder || folder;
 	const modelSelection = await validateCliModelSelection(runFolder, seedModelSelection);
-	const meshId = existing?.meshId || createMeshId({ folder: runFolder, sessionFile });
+	const meshId = existing?.meshId || createMeshId({ folder: runFolder, sessionFile: existing?.sessionFile });
 	const socketPath = await socketPathFor(mesh, meshId);
 	let record = existing;
+	if (record) {
+		record = await claimManagedSessionForActivation(mesh, record, {
+			name,
+			labels: labels.length ? labels : record.labels,
+			kind: "interactive",
+			status: "starting",
+			pid: process.pid,
+			socketPath,
+			pendingModelSelection: modelSelection && !(await exists(record.sessionFile)) ? modelSelection : undefined,
+		}, "opening another live TUI");
+	}
+	const sessionFile = record?.sessionFile;
 
 	const { runInteractive } = await import("./pi-runner.js");
 	await runInteractive({
@@ -632,7 +740,7 @@ async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 	const mesh = await getMesh();
 	await refreshStaleManagedSessions(mesh, await listManagedSessions(mesh));
 	const resolved = await resolveSessionFile(mesh, spec);
-	assertNotAlreadyLive(resolved.managed, "attaching it again");
+	await assertNotAlreadyActive(resolved.managed, "attaching it again");
 	const folder = getString(parsed, "folder") ? await resolveFolder(getString(parsed, "folder")) : resolved.folder;
 	const pendingModelSelection = resolved.managed && !(await exists(resolved.managed.sessionFile)) ? resolved.managed.pendingModelSelection : undefined;
 	const seedModelSelection = mergeModelSelection(pendingModelSelection, rawModelSelection);
@@ -642,6 +750,18 @@ async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 	const meshId = resolved.managed?.meshId || createMeshId({ folder, sessionFile: resolved.sessionFile });
 	const socketPath = await socketPathFor(mesh, meshId);
 	let record = resolved.managed;
+	if (record) {
+		record = await claimManagedSessionForActivation(mesh, record, {
+			name,
+			labels: labels.length ? labels : record.labels,
+			folder,
+			kind: "attached",
+			status: "starting",
+			pid: process.pid,
+			socketPath,
+			pendingModelSelection: modelSelection && !(await exists(record.sessionFile)) ? modelSelection : undefined,
+		}, "attaching it again");
+	}
 
 	if (!resolved.managed) {
 		console.error("Note: attaching an unmanaged Pi session. Close any other Pi process using the same JSONL file first.");
@@ -650,7 +770,7 @@ async function cmdAttach(parsed: ParsedArgs): Promise<void> {
 	const { runInteractive } = await import("./pi-runner.js");
 	await runInteractive({
 		cwd: folder,
-		sessionFile: resolved.sessionFile,
+		sessionFile: record?.sessionFile || resolved.sessionFile,
 		name,
 		socketPath,
 		modelSelection,
@@ -731,6 +851,8 @@ async function deliverToManagedSession(
 				sessionFile: result.sessionFile || managed.sessionFile,
 				rawSessionId: result.rawSessionId,
 				status: "offline",
+				pid: undefined,
+				socketPath: undefined,
 				lastError: undefined,
 				pendingModelSelection: undefined,
 			});

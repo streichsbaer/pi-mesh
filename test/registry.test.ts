@@ -22,7 +22,6 @@ async function tempMesh(): Promise<MeshPaths> {
 		id: "local",
 		baseDir,
 		registryFile: path.join(baseDir, "registry.jsonl"),
-		inboxDir: path.join(baseDir, "inbox"),
 		locksDir: path.join(baseDir, "locks"),
 		socketDirFile: path.join(baseDir, "socket-dir"),
 	};

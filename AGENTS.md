@@ -7,6 +7,10 @@
 - If changes are already staged, preserve that staging state unless the user explicitly asks to change it.
 - Before any requested staging/commit/push operation, show or verify the relevant `git status` so the user can see what will be affected.
 
+## GitHub communication
+
+- When writing PR messages, PR comments, or release notes, use real newlines instead of escaped `\n` sequences.
+
 ## Compatibility and implementation style
 
 - Do not preserve backwards compatibility unless the user explicitly asks for it.
