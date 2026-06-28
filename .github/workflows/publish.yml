@@ -28,4 +28,4 @@ jobs:
       - run: npm audit signatures
       - run: npm run ci
       - run: npm pack --dry-run --ignore-scripts
-      - run: npm publish --access public --ignore-scripts
+      - run: npm stage publish --access public --ignore-scripts

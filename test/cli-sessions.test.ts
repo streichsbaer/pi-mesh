@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { upsertManagedSession } from "../src/registry.js";
+import { lockPathFor, upsertManagedSession } from "../src/registry.js";
+import { withDirectoryLock } from "../src/lock.js";
 import type { ManagedSessionRecord, MeshPaths } from "../src/types.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,7 +27,6 @@ function meshFor(home: string): MeshPaths {
 		id: "local",
 		baseDir,
 		registryFile: path.join(baseDir, "registry.jsonl"),
-		inboxDir: path.join(baseDir, "inbox"),
 		locksDir: path.join(baseDir, "locks"),
 		socketDirFile: path.join(baseDir, "socket-dir"),
 	};
@@ -146,6 +147,170 @@ describe("sessions CLI", () => {
 		expect(byLabel.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
 	}, CLI_TEST_TIMEOUT_MS);
 
+	it("deletes a managed session from the registry while keeping the session file by default", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		await writeFile(sessionFile, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), pid: process.pid });
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--json"]);
+		const payload = JSON.parse(result.stdout);
+
+		expect(payload.ok).toBe(true);
+		expect(payload.deleted.meshId).toBe("managed-worker");
+		expect(payload.deletedFile).toBe(false);
+		await expect(access(sessionFile)).resolves.toBeUndefined();
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed).toEqual([]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("requires confirmation before deleting the underlying session file", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		await writeFile(sessionFile, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderRoot, sessionFile));
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--delete-file"], { expectFailure: true });
+
+		expect(result.stderr).toContain("--delete-file requires an interactive terminal");
+		await expect(access(sessionFile)).resolves.toBeUndefined();
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("can delete the underlying session file with force", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		await writeFile(sessionFile, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderRoot, sessionFile));
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--delete-file", "--force", "--json"]);
+		const payload = JSON.parse(result.stdout);
+
+		expect(payload.deletedFile).toBe(true);
+		await expect(access(sessionFile)).rejects.toMatchObject({ code: "ENOENT" });
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("reports no deleted file when the underlying session file is already absent", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "missing.jsonl");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderRoot, sessionFile));
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--delete-file", "--force", "--json"]);
+		const payload = JSON.parse(result.stdout);
+
+		expect(payload.deletedFile).toBe(false);
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed).toEqual([]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("refuses to delete a live managed session", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		const socketPath = path.join(folderRoot, "managed.sock");
+		await writeFile(sessionFile, "", "utf8");
+		await writeFile(socketPath, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), status: "running", pid: process.pid, socketPath });
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--delete-file", "--force"], { expectFailure: true });
+
+		expect(result.stderr).toContain("already active");
+		expect(result.stderr).toContain("before deleting it");
+		await expect(access(sessionFile)).resolves.toBeUndefined();
+		await expect(access(socketPath)).resolves.toBeUndefined();
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("refuses force deletion for a live managed session", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		const socketPath = path.join(folderRoot, "managed.sock");
+		await writeFile(sessionFile, "", "utf8");
+		await writeFile(socketPath, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), status: "running", pid: process.pid, socketPath });
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--force"], { expectFailure: true });
+
+		expect(result.stderr).toContain("already active");
+		expect(result.stderr).toContain("before deleting it");
+		await expect(access(sessionFile)).resolves.toBeUndefined();
+		await expect(access(socketPath)).resolves.toBeUndefined();
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("refuses to delete an error-status session while its process or socket is still active", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		const socketPath = path.join(folderRoot, "managed.sock");
+		await writeFile(sessionFile, "", "utf8");
+		await writeFile(socketPath, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), status: "error", pid: process.pid, socketPath });
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--delete-file", "--force"], { expectFailure: true });
+
+		expect(result.stderr).toContain("already active");
+		expect(result.stderr).toContain("before deleting it");
+		await expect(access(sessionFile)).resolves.toBeUndefined();
+		await expect(access(socketPath)).resolves.toBeUndefined();
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed.map((item: ManagedSessionRecord) => item.meshId)).toEqual(["managed-worker"]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("deletes an error-status session after active process and socket evidence are gone", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		const socketPath = path.join(folderRoot, "managed.sock");
+		await writeFile(sessionFile, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), status: "error", pid: undefined, socketPath });
+
+		const result = await runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--delete-file", "--force", "--json"]);
+		const payload = JSON.parse(result.stdout);
+
+		expect(payload.deletedFile).toBe(true);
+		await expect(access(sessionFile)).rejects.toMatchObject({ code: "ENOENT" });
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed).toEqual([]);
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("waits for in-flight session writes before deleting the registry entry", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));
+		const sessionFile = path.join(folderRoot, "managed.jsonl");
+		await writeFile(sessionFile, "", "utf8");
+		const mesh = meshFor(home);
+		await upsertManagedSession(mesh, managedRecord(folderRoot, sessionFile));
+
+		let deletePromise: Promise<Awaited<ReturnType<typeof runCli>>> | undefined;
+		await withDirectoryLock(lockPathFor(mesh, "managed-worker"), async () => {
+			deletePromise = runCli(home, ["sessions", "delete", "managed-worker", "--folder", folderRoot, "--json"]);
+			await sleep(500);
+			await upsertManagedSession(mesh, { ...managedRecord(folderRoot, sessionFile), status: "offline", lastError: "final in-flight write" });
+		});
+
+		const result = await deletePromise;
+		expect(JSON.parse(result!.stdout).deleted.meshId).toBe("managed-worker");
+		const listed = JSON.parse((await runCli(home, ["sessions", "list", "--folder", folderRoot, "--json"])).stdout);
+		expect(listed.managed).toEqual([]);
+	}, CLI_TEST_TIMEOUT_MS);
+
 	it("requires an explicit broadcast when a send selector matches multiple sessions", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
 		const folderA = await realpath(await makeTempDir("pi-mesh-cli-folder-a-"));
@@ -172,7 +337,7 @@ describe("sessions CLI", () => {
 		const result = await runCli(home, ["attach", sessionFile, "--name", "renamed", "--folder", otherFolder, "--label", "new-label"], { expectFailure: true });
 
 		expect(result.exitCode).not.toBe(0);
-		expect(result.stderr).toContain("already live");
+		expect(result.stderr).toContain("already active");
 	}, CLI_TEST_TIMEOUT_MS);
 
 	it("gives attach guidance when sending to an unmanaged readable Pi session", async () => {

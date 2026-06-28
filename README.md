@@ -12,10 +12,10 @@
 ## Installation
 
 ```bash
-npm install -g @streichsbaer/pi-mesh
+npm install -g @streichsbaer/pi-mesh --ignore-scripts
 ```
 
-The package installs the `pi-mesh` binary.
+The package installs the `pi-mesh` binary and does not require npm install scripts.
 
 ## Goals
 
@@ -33,6 +33,7 @@ pi-mesh sessions list --include-pi  # include recent unmanaged Pi sessions
 pi-mesh sessions find auth
 pi-mesh sessions list --folder ./api
 pi-mesh sessions list --label pi-mesh-development
+pi-mesh sessions delete worker-api
 pi-mesh models list sonnet --folder ./api --scoped
 pi-mesh transcript <session> --last 3
 pi-mesh state <session>
@@ -76,7 +77,6 @@ State is stored outside the repo:
 ```text
 ~/.pi/agent/pi-mesh/
   registry.jsonl
-  inbox/
   locks/
   socket-dir
 ```
@@ -86,6 +86,8 @@ Live control sockets use short hashed paths under a private randomized runtime d
 ## Existing Pi sessions
 
 Already-running normal Pi sessions can be discovered and read from their JSONL files. `pi-mesh sessions list` shows managed sessions by default; pass `--include-pi` or `--all` to include recent unmanaged Pi sessions. To message one, close the original process first and attach/resume it through `pi-mesh attach` so pi-mesh can own the live control socket.
+
+Use `pi-mesh sessions delete <session>` to remove a stopped managed session from the local registry. Active sessions, including records with a live process or socket, must be stopped first. The Pi JSONL session file is kept unless `--delete-file` is passed and confirmed; pass `--force` to skip that file-delete confirmation.
 
 ## Install for development
 

@@ -8,7 +8,6 @@ export async function resolveMesh(): Promise<MeshPaths> {
 		id: "local",
 		baseDir,
 		registryFile: path.join(baseDir, "registry.jsonl"),
-		inboxDir: path.join(baseDir, "inbox"),
 		locksDir: path.join(baseDir, "locks"),
 		socketDirFile: path.join(baseDir, "socket-dir"),
 	};
@@ -19,7 +18,6 @@ export async function resolveMesh(): Promise<MeshPaths> {
 export async function ensureMesh(mesh: MeshPaths): Promise<void> {
 	await Promise.all([
 		ensureDir(mesh.baseDir),
-		ensureDir(mesh.inboxDir),
 		ensureDir(mesh.locksDir),
 	]);
 }

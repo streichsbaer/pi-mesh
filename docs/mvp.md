@@ -80,7 +80,6 @@ Storage:
 ```text
 ~/.pi/agent/pi-mesh/
   registry.jsonl
-  inbox/
   locks/
   socket-dir
 ```
@@ -88,6 +87,8 @@ Storage:
 Live control sockets use short hashed paths under a private randomized runtime directory such as `/tmp/pi-mesh-<uid>-<random>/`.
 
 The registry is append-only JSONL so crashes do not corrupt the whole registry. Each underlying Pi JSONL session can be managed only once in the local registry.
+
+`pi-mesh sessions delete <session>` removes a stopped managed session from the registry. Active sessions, including records with a live process or socket, must be stopped first. The underlying Pi JSONL session file is kept by default and removed only with `--delete-file` after confirmation; pass `--force` to skip that file-delete confirmation.
 
 ## Message delivery
 
@@ -124,7 +125,6 @@ This is read-only. Live message injection requires a pi-mesh-managed process/soc
 
 ## Future work
 
-- Durable queued inbox draining for multiple messages.
 - Git worktree spawning.
 - Richer status and process supervision.
 - Optional machine protocol for dashboards, if the CLI stops being sufficient.

@@ -140,7 +140,6 @@ export interface MeshPaths {
 	id: "local";
 	baseDir: string;
 	registryFile: string;
-	inboxDir: string;
 	locksDir: string;
 	socketDirFile: string;
 }
