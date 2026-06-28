@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -117,6 +117,48 @@ afterEach(async () => {
 });
 
 describe("sessions CLI", () => {
+	it("prints the package version", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const result = await runCli(home, ["--version"]);
+		expect(result.stdout.trim()).toMatch(/^@streichsbaer\/pi-mesh \d+\.\d+\.\d+$/);
+
+		const jsonResult = await runCli(home, ["version", "--json"]);
+		const payload = JSON.parse(jsonResult.stdout) as { ok: boolean; name: string; version: string };
+		expect(payload).toMatchObject({
+			ok: true,
+			name: "@streichsbaer/pi-mesh",
+		});
+		expect(payload.version).toMatch(/^\d+\.\d+\.\d+$/);
+	});
+
+	it("installs and refreshes the pi-mesh skill in global skill folders", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const agentsSkillFile = path.join(home, ".agents", "skills", "pi-mesh", "SKILL.md");
+		const claudeSkillFile = path.join(home, ".claude", "skills", "pi-mesh", "SKILL.md");
+		await mkdir(path.dirname(agentsSkillFile), { recursive: true });
+		await mkdir(path.join(home, ".claude", "skills"), { recursive: true });
+		await writeFile(agentsSkillFile, "stale skill", "utf8");
+
+		const result = await runCli(home, ["setup", "skill"]);
+
+		expect(result.stdout).toContain("global Agent Skill");
+		expect(result.stdout).toContain(path.join(home, ".agents", "skills", "pi-mesh"));
+		expect(result.stdout).toContain(path.join(home, ".claude", "skills", "pi-mesh"));
+		expect(await readFile(agentsSkillFile, "utf8")).toContain("name: pi-mesh");
+		expect(await readFile(claudeSkillFile, "utf8")).toContain("name: pi-mesh");
+	}, CLI_TEST_TIMEOUT_MS);
+
+	it("installs the pi-mesh skill into a custom skills root", async () => {
+		const home = await makeTempDir("pi-mesh-cli-home-");
+		const skillsRoot = await makeTempDir("pi-mesh-custom-skills-");
+
+		const result = await runCli(home, ["setup", "skill", "--folder", skillsRoot]);
+
+		expect(result.stdout).toContain(`Installing pi-mesh Agent Skill into ${skillsRoot}`);
+		expect(await readFile(path.join(skillsRoot, "pi-mesh", "SKILL.md"), "utf8")).toContain("name: pi-mesh");
+		await expect(access(path.join(home, ".agents", "skills", "pi-mesh", "SKILL.md"))).rejects.toMatchObject({ code: "ENOENT" });
+	}, CLI_TEST_TIMEOUT_MS);
+
 	it("keeps unmanaged Pi sessions out of list output unless explicitly requested", async () => {
 		const home = await makeTempDir("pi-mesh-cli-home-");
 		const folderRoot = await realpath(await makeTempDir("pi-mesh-cli-folder-"));

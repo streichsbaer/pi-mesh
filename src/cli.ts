@@ -2,7 +2,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { exists } from "./utils.js";
+import { fileURLToPath } from "node:url";
+import { exists, expandHome, homeDir } from "./utils.js";
 import { formatTimestamp, truncate, compactWhitespace } from "./utils.js";
 import { loadSessionData, loadSessionDataForSession, renderToolLine, resolveSessionSpec, searchSessions, tail } from "./pi-session-parser.js";
 import { createMeshId, deleteManagedSession, filterManagedSessions, findManagedSessionById, findManagedSessions, listManagedSessions, lockPathFor, normalizeLabels, socketPathFor, upsertManagedSession, type SessionSelector } from "./registry.js";
@@ -220,6 +221,23 @@ async function getMesh(): Promise<MeshPaths> {
 	return resolveMesh();
 }
 
+async function readPackageInfo(): Promise<{ name: string; version: string; packageJson: string }> {
+	const packageJson = fileURLToPath(new URL("../package.json", import.meta.url));
+	const raw = await fs.readFile(packageJson, "utf8");
+	const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
+	return {
+		name: typeof parsed.name === "string" ? parsed.name : "pi-mesh",
+		version: typeof parsed.version === "string" ? parsed.version : "unknown",
+		packageJson,
+	};
+}
+
+async function printVersion(asJson: boolean): Promise<void> {
+	const info = await readPackageInfo();
+	if (asJson) console.log(JSON.stringify({ ok: true, ...info }, null, 2));
+	else console.log(`${info.name} ${info.version}`);
+}
+
 function printHelp(): void {
 	console.log(`pi-mesh
 
@@ -230,6 +248,9 @@ Usage:
   pi-mesh transcript <session> [--folder <dir>] [--name <name>] [--label <label>] [--last 3] [--json] [--show-tools]
   pi-mesh state <session> [--folder <dir>] [--name <name>] [--label <label>] [--json]
   pi-mesh models list [search] [--folder <dir>] [--json] [--all] [--scoped]
+  pi-mesh version [--json]
+  pi-mesh setup skill [--folder <skills-root>]
+  pi-mesh --version
 
   pi-mesh spawn --name <name> [--folder <dir>] [--label <label>] [--prompt <text>] [--attach] [--provider <name>] [--model <ref>] [--thinking <level>]
   pi-mesh run --name <name> [--folder <dir>] [--label <label>] [--new] [--prompt <text>] [--provider <name>] [--model <ref>] [--thinking <level>]
@@ -243,8 +264,59 @@ Notes:
   - names and labels are not unique; use --all to intentionally broadcast to multiple matches.
   - pass --model provider/model or --model model:thinking to choose a session model.
   - use models list to inspect Pi-configured models; --folder selects the target session/settings scope, --all includes unauthenticated models, and --scoped filters Pi enabledModels.
+  - setup skill installs the pi-mesh Agent Skill globally into ~/.agents/skills, and also ~/.claude/skills when that folder exists.
   - unmanaged already-running Pi sessions are readable; close and attach them to make them managed.
 `);
+}
+
+async function directoryExists(dir: string): Promise<boolean> {
+	try {
+		return (await fs.stat(dir)).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+function bundledSkillDir(): string {
+	return fileURLToPath(new URL("../skills/pi-mesh", import.meta.url));
+}
+
+function isPathInside(child: string, parent: string): boolean {
+	const relative = path.relative(parent, child);
+	return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function installSkillCopy(sourceDir: string, targetDir: string): Promise<"installed" | "source"> {
+	const resolvedSource = path.resolve(sourceDir);
+	const resolvedTarget = path.resolve(targetDir);
+	if (resolvedSource === resolvedTarget) return "source";
+	if (isPathInside(resolvedTarget, resolvedSource)) throw new Error(`Refusing to install skill inside its bundled source directory: ${targetDir}`);
+	await fs.mkdir(path.dirname(targetDir), { recursive: true });
+	await fs.rm(targetDir, { recursive: true, force: true });
+	await fs.cp(sourceDir, targetDir, { recursive: true });
+	return "installed";
+}
+
+async function cmdSetup(parsed: ParsedArgs): Promise<void> {
+	const subcommand = parsed.positionals[1];
+	if (subcommand !== "skill") throw new Error("Usage: pi-mesh setup skill [--folder <skills-root>]");
+	const folderOption = getRequiredString(parsed, "folder");
+	const sourceDir = bundledSkillDir();
+	if (!(await exists(path.join(sourceDir, "SKILL.md")))) throw new Error(`Bundled pi-mesh skill not found at ${sourceDir}`);
+
+	const roots = folderOption
+		? [path.resolve(expandHome(folderOption))]
+		: [path.join(homeDir(), ".agents", "skills")];
+	const claudeSkillsDir = path.join(homeDir(), ".claude", "skills");
+	if (!folderOption && await directoryExists(claudeSkillsDir)) roots.push(claudeSkillsDir);
+
+	console.log(folderOption ? `Installing pi-mesh Agent Skill into ${roots[0]}...` : "Installing pi-mesh as a global Agent Skill...");
+	for (const root of roots) {
+		const targetDir = path.join(root, "pi-mesh");
+		const status = await installSkillCopy(sourceDir, targetDir);
+		console.log(`✓ ${targetDir}${status === "source" ? " (already the bundled source)" : ""}`);
+	}
+	if (!folderOption) console.log("Run `pi-mesh setup skill` again after upgrading pi-mesh to refresh the installed skill.");
 }
 
 function printManaged(record: ManagedSessionRecord): void {
@@ -920,11 +992,14 @@ async function cmdSend(parsed: ParsedArgs): Promise<void> {
 async function main(): Promise<void> {
 	const parsed = parseArgs(process.argv.slice(2));
 	const command = parsed.positionals[0];
+	if (getBool(parsed, "version")) return printVersion(getBool(parsed, "json"));
 	if (!command || command === "help" || getBool(parsed, "help")) {
 		printHelp();
 		return;
 	}
 
+	if (command === "version") return printVersion(getBool(parsed, "json"));
+	if (command === "setup") return cmdSetup(parsed);
 	if (command === "sessions") return cmdSessions(parsed);
 	if (command === "models") return cmdModels(parsed);
 	if (command === "transcript") return cmdTranscript(parsed);

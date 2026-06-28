@@ -17,6 +17,14 @@ npm install -g @streichsbaer/pi-mesh --ignore-scripts
 
 The package installs the `pi-mesh` binary and does not require npm install scripts.
 
+Install or refresh the global Agent Skill after installation or upgrade:
+
+```bash
+pi-mesh setup skill
+```
+
+This always writes `~/.agents/skills/pi-mesh` and also writes `~/.claude/skills/pi-mesh` when the Claude Code global skills folder already exists. To install into a custom skills root instead, use `pi-mesh setup skill --folder <skills-root>`.
+
 ## Goals
 
 - Keep vanilla Pi TUI for interactive use.
@@ -28,6 +36,9 @@ The package installs the `pi-mesh` binary and does not require npm install scrip
 ## Common commands
 
 ```bash
+pi-mesh --version
+pi-mesh version --json
+pi-mesh setup skill
 pi-mesh sessions list
 pi-mesh sessions list --include-pi  # include recent unmanaged Pi sessions
 pi-mesh sessions find auth
