@@ -241,31 +241,47 @@ async function printVersion(asJson: boolean): Promise<void> {
 function printHelp(): void {
 	console.log(`pi-mesh
 
-Usage:
-  pi-mesh sessions list [--folder <dir>] [--name <name>] [--label <label>] [--limit 25] [--json] [--include-pi|--all]
-  pi-mesh sessions find <query> [--folder <dir>] [--name <name>] [--label <label>] [--limit 25] [--json] [--include-pi|--all]
-  pi-mesh sessions delete <session> [--folder <dir>] [--name <name>] [--label <label>] [--delete-file] [--force] [--json]
-  pi-mesh transcript <session> [--folder <dir>] [--name <name>] [--label <label>] [--last 3] [--json] [--show-tools]
-  pi-mesh state <session> [--folder <dir>] [--name <name>] [--label <label>] [--json]
-  pi-mesh models list [search] [--folder <dir>] [--json] [--all] [--scoped]
-  pi-mesh version [--json]
-  pi-mesh setup skill [--folder <skills-root>]
-  pi-mesh --version
+Coordinate local Pi sessions from the command line.
 
-  pi-mesh spawn --name <name> [--folder <dir>] [--label <label>] [--prompt <text>] [--attach] [--provider <name>] [--model <ref>] [--thinking <level>]
-  pi-mesh run --name <name> [--folder <dir>] [--label <label>] [--new] [--prompt <text>] [--provider <name>] [--model <ref>] [--thinking <level>]
-  pi-mesh attach <session|session-file> [--name <name>] [--folder <dir>] [--label <label>] [--provider <name>] [--model <ref>] [--thinking <level>]
-  pi-mesh send [<session>] <message> [--folder <dir>] [--name <name>] [--label <label>] [--all] [--delivery auto|prompt|steer|follow-up] [--stream] [--provider <name>] [--model <ref>] [--thinking <level>]
+Usage:
+  pi-mesh <command> [options]
+
+Core commands:
+  setup skill       Install or refresh the bundled Agent Skill
+  sessions list     List managed sessions
+  sessions find     Search managed and recent Pi sessions
+  transcript        Show recent messages for a session
+  state             Show session state
+  spawn             Create a sleeping/headless managed session
+  run               Start or resume an interactive Pi TUI session
+  attach            Register an existing Pi JSONL session
+  send              Send work to a managed session
+  models list       Inspect Pi-configured models
+  version           Print package version
+
+Examples:
+  pi-mesh setup skill
+  pi-mesh sessions list --json
+  pi-mesh sessions list --include-pi
+  pi-mesh spawn --name worker-api --folder ./api --prompt "Inspect the auth tests"
+  pi-mesh send worker-api "Fix the failing auth test" --stream
+  pi-mesh send --label pi-mesh-development --all "Report status"
+  pi-mesh run --name coordinator --folder .
+  pi-mesh attach /path/to/session.jsonl --name old-session
+
+Common options:
+  --folder <dir>       Filter or run a session in a folder
+  --name <name>        Filter or name a managed session
+  --label <label>      Filter or label a managed session; repeatable
+  --json               Print machine-readable output
+  --model <ref>        Select a model, optionally as model:thinking
+  --thinking <level>   off, minimal, low, medium, high, or xhigh
+  --all                Intentionally send to every matching session
 
 Notes:
-  - spawn defaults to sleeping/headless. Use --attach or pi-mesh run for vanilla Pi TUI.
-  - send wakes sleeping managed sessions, or uses a live socket for pi-mesh run sessions.
-  - sessions are tracked in one machine-local registry; --folder, --name, and --label filter it.
-  - names and labels are not unique; use --all to intentionally broadcast to multiple matches.
-  - pass --model provider/model or --model model:thinking to choose a session model.
-  - use models list to inspect Pi-configured models; --folder selects the target session/settings scope, --all includes unauthenticated models, and --scoped filters Pi enabledModels.
-  - setup skill installs the pi-mesh Agent Skill globally into ~/.agents/skills, and also ~/.claude/skills when ~/.claude exists.
-  - unmanaged already-running Pi sessions are readable; close and attach them to make them managed.
+  spawn sleeps by default; send wakes sleeping sessions or uses a live socket.
+  Names and labels are not unique, so use ids or filters when targeting sessions.
+  setup skill writes ~/.agents/skills/pi-mesh and, when ~/.claude exists, ~/.claude/skills/pi-mesh.
 `);
 }
 

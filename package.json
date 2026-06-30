@@ -1,6 +1,6 @@
 {
 	"name": "@streichsbaer/pi-mesh",
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"description": "CLI and skill for coordinating Pi sessions through a local file/socket mesh",
 	"type": "module",
 	"packageManager": "npm@11.17.0",

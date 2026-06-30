@@ -11,6 +11,11 @@
 
 - When writing PR messages, PR comments, or release notes, use real newlines instead of escaped `\n` sequences.
 
+## Release workflow
+
+- Follow `docs/release.md` for release preparation and publishing.
+- When publishing a GitHub Release, select the existing version tag, such as `v0.1.6`, instead of targeting `main` directly. The publish workflow should run with `headBranch` equal to the tag name; npm Trusted Publishing can reject provenance when the release event resolves as `main`.
+
 ## Compatibility and implementation style
 
 - Do not preserve backwards compatibility unless the user explicitly asks for it.
