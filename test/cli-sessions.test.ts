@@ -136,7 +136,7 @@ describe("sessions CLI", () => {
 		const agentsSkillFile = path.join(home, ".agents", "skills", "pi-mesh", "SKILL.md");
 		const claudeSkillFile = path.join(home, ".claude", "skills", "pi-mesh", "SKILL.md");
 		await mkdir(path.dirname(agentsSkillFile), { recursive: true });
-		await mkdir(path.join(home, ".claude", "skills"), { recursive: true });
+		await mkdir(path.join(home, ".claude"), { recursive: true });
 		await writeFile(agentsSkillFile, "stale skill", "utf8");
 
 		const result = await runCli(home, ["setup", "skill"]);

@@ -23,7 +23,7 @@ Install or refresh the global Agent Skill after installation or upgrade:
 pi-mesh setup skill
 ```
 
-This always writes `~/.agents/skills/pi-mesh` and also writes `~/.claude/skills/pi-mesh` when the Claude Code global skills folder already exists. To install into a custom skills root instead, use `pi-mesh setup skill --folder <skills-root>`.
+This always writes `~/.agents/skills/pi-mesh` and also writes `~/.claude/skills/pi-mesh` when `~/.claude` exists. To install into a custom skills root instead, use `pi-mesh setup skill --folder <skills-root>`.
 
 ## Goals
 

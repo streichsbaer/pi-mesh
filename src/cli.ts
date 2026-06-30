@@ -264,7 +264,7 @@ Notes:
   - names and labels are not unique; use --all to intentionally broadcast to multiple matches.
   - pass --model provider/model or --model model:thinking to choose a session model.
   - use models list to inspect Pi-configured models; --folder selects the target session/settings scope, --all includes unauthenticated models, and --scoped filters Pi enabledModels.
-  - setup skill installs the pi-mesh Agent Skill globally into ~/.agents/skills, and also ~/.claude/skills when that folder exists.
+  - setup skill installs the pi-mesh Agent Skill globally into ~/.agents/skills, and also ~/.claude/skills when ~/.claude exists.
   - unmanaged already-running Pi sessions are readable; close and attach them to make them managed.
 `);
 }
@@ -307,8 +307,8 @@ async function cmdSetup(parsed: ParsedArgs): Promise<void> {
 	const roots = folderOption
 		? [path.resolve(expandHome(folderOption))]
 		: [path.join(homeDir(), ".agents", "skills")];
-	const claudeSkillsDir = path.join(homeDir(), ".claude", "skills");
-	if (!folderOption && await directoryExists(claudeSkillsDir)) roots.push(claudeSkillsDir);
+	const claudeDir = path.join(homeDir(), ".claude");
+	if (!folderOption && await directoryExists(claudeDir)) roots.push(path.join(claudeDir, "skills"));
 
 	console.log(folderOption ? `Installing pi-mesh Agent Skill into ${roots[0]}...` : "Installing pi-mesh as a global Agent Skill...");
 	for (const root of roots) {
